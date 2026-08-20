@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, Numeric, String
+from sqlalchemy import Integer, Numeric, String, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 #SQLAlchemy model Represents the database.
@@ -12,6 +12,7 @@ class Base(DeclarativeBase):
 class Property(Base):
     __tablename__ = "properties"#__tablename__ is you explicitly telling it: "when you generate SQL for this class — SELECT, INSERT, UPDATE, whatever — target the table literally named properties."
     # Concretely, this line is what makes this SQL work when you later call db.query(Property):
+    user_id: Mapped[int] = mapped_column("userid",Integer,ForeignKey("users.id"),nullable=False)
 
     id: Mapped[int] = mapped_column(
         Integer,

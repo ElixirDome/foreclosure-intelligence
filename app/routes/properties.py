@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends,status, HTTPException
+from fastapi import (APIRouter,Query,
+Depends,status, HTTPException)
 from sqlalchemy.orm import Session
+from math import ceil
 
 from app.database import SessionLocal
 from app.models import Property, User
-from app.schemas import PropertyResponse,PropertyCreate,PropertyUpdate #didn't import it lost 10 mins
+from app.schemas import PropertyResponse,PropertyListResponse,PropertyCreate,PropertyUpdate #didn't import it lost 10 mins
 from app.security import (get_current_user, require_role,
                           require_property_owner #
                           )
@@ -18,28 +20,35 @@ def get_db():
     finally:#using finally ensures that the session is closed even if an exception occurs during the request handling. This is important for resource management and preventing connection leaks.
         db.close()
 
-
 @router.get(
     "/",
-    response_model=list[PropertyResponse]
+    response_model=PropertyListResponse
 )
 def get_properties(
-    min_price: float | None = None,
-    max_price: float | None = None,
+    page: int = Query(1, ge=1),#FastAPI lets us constrain query parameters.
+    limit: int = Query(20, ge=1, le=100),# now a client couldn't do GET /properties?limit=100000000
     db: Session = Depends(get_db)
 ):
-    query = db.query(Property)
+    offset = (page - 1) * limit
 
-    if min_price is not None:
-        query = query.filter(
-            Property.price >= min_price
-        )
+    total = db.query(Property).count()#COUNT(*) How many properties exist?
 
-    if max_price is not None:
-        query = query.filter(
-            Property.price <= max_price
-        )
-    return query.all()
+    properties = (
+        db.query(Property)
+        .order_by(Property.id)#The database isn't required to return rows in a stable order unless you ask for one.
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    pages = ceil(total / limit)
+
+    return {
+        "items": properties,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": pages
+    }
 
 @router.post(
     "/",
@@ -100,20 +109,9 @@ def delete_property(
 def update_property(
     property_id: int,
     property_data: PropertyUpdate,
+    property: Property = Depends(require_property_owner),
     db: Session = Depends(get_db)
 ):
-    property = (
-        db.query(Property)
-        .filter(Property.id == property_id)
-        .first()
-    )
-
-    if property is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Property not found"
-        )
-
     update_data = property_data.model_dump(
         exclude_unset=True
     )

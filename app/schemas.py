@@ -30,7 +30,7 @@ class PropertyUpdate(BaseModel):
 class UserCreate(BaseModel):
     email: str
     password: str
-
+#####################33 don't CREATE SPACE BETWEEN THESE CLASSES
 class UserResponse(BaseModel):
     id: int
     email: str
@@ -44,3 +44,10 @@ class UserLogin(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+class PropertyListResponse(BaseModel):
+    items: list[PropertyResponse]
+    page: int
+    limit: int
+    total: int
+    pages: int
