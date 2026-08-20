@@ -27,19 +27,34 @@ def get_db():
 def get_properties(
     page: int = Query(1, ge=1),#FastAPI lets us constrain query parameters.
     limit: int = Query(20, ge=1, le=100),# now a client couldn't do GET /properties?limit=100000000
+    min_price: int | None = Query(None, ge=0),
+    max_price: int | None = Query(None, ge=0),
+    bedrooms: int | None = Query(None, ge=0),
     db: Session = Depends(get_db)
 ):
+    query = db.query(Property)
+
+    if min_price is not None:
+     query = query.filter(Property.price >= min_price)
+
+    if max_price is not None:
+        query = query.filter(Property.price <= max_price)
+
+    if bedrooms is not None:
+        query = query.filter(Property.bedrooms == bedrooms)    
+
+    total = query.count()#COUNT
+
     offset = (page - 1) * limit
 
-    total = db.query(Property).count()#COUNT(*) How many properties exist?
-
     properties = (
-        db.query(Property)
+        query        #db.query(Property)# ❌ creates a NEW unfiltered query
         .order_by(Property.id)#The database isn't required to return rows in a stable order unless you ask for one.
         .offset(offset)
         .limit(limit)
         .all()
     )
+
     pages = ceil(total / limit)
 
     return {
