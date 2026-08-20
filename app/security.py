@@ -1,7 +1,7 @@
 import os
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
+from app.database import SessionLocal, get_db
 from app.models import (
 User,
 Property#required in >def require_property_owner
@@ -16,14 +16,6 @@ from fastapi.security import OAuth2PasswordBearer
 
 load_dotenv()
 
-def get_db():
-    db = SessionLocal()
-
-    try:
-        yield db
-    finally:
-        db.close()
-
 oauth2_scheme = OAuth2PasswordBearer(#"When an endpoint requires authentication, look for a Bearer token in the Authorization header."
     tokenUrl="/auth/login"
 )
@@ -32,6 +24,7 @@ def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ):
+    print("CURRENT USER DB:", id(db))
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -140,6 +133,7 @@ def require_property_owner(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    print("OWNER DB:", id(db))
     property = (
         db.query(Property)
         .filter(Property.id == property_id)
@@ -152,8 +146,7 @@ def require_property_owner(
             detail="Property not found"
         )
 
-    if (
-        property.user_id != current_user.id
+    if ( property.user_id != current_user.id
         and current_user.role != "admin"
     ):
         raise HTTPException(

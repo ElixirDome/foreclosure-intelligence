@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pwdlib import PasswordHash
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
-from app.database import SessionLocal
+from app.database import SessionLocal,get_db
 from app.models import User
 from app.schemas import UserCreate, UserResponse, UserLogin,Token
 from app.security import verify_password, create_access_token
@@ -15,15 +15,6 @@ router = APIRouter(
 
 
 password_hash = PasswordHash.recommended()
-
-
-def get_db():
-    db = SessionLocal()
-
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.post(
