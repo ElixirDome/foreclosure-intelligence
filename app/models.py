@@ -1,12 +1,8 @@
 from sqlalchemy import Integer, Numeric, String, ForeignKey
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column,relationship
+from app.database import Base
 #SQLAlchemy model Represents the database.
 #Python class that represents one table in your database. Each class attribute maps to one column. It's the bridge that lets you write Python code instead of raw SQL strings to interact with the database.
-
-
-class Base(DeclarativeBase):
-    pass
 
 
 class Property(Base):
@@ -14,6 +10,9 @@ class Property(Base):
     # Concretely, this line is what makes this SQL work when you later call db.query(Property):
     user_id: Mapped[int] = mapped_column("userid",Integer,ForeignKey("users.id"),nullable=False)
 
+    user: Mapped["User"] = relationship(
+        back_populates="properties")
+    
     id: Mapped[int] = mapped_column(
         Integer,
         primary_key=True
@@ -22,11 +21,13 @@ class Property(Base):
     address: Mapped[str] = mapped_column( String, nullable=False)
 
     price: Mapped[float | None] = mapped_column(
-        Numeric
+        Numeric,
+        index=True
     )
 
     bedrooms: Mapped[int | None] = mapped_column(
-        Integer
+        Integer,
+        index=True
     )
 
     bathrooms: Mapped[float | None] = mapped_column(
@@ -41,6 +42,9 @@ class Property(Base):
 class User(Base):
     __tablename__ = "users"
 
+    properties: Mapped[list["Property"]] = relationship(
+    back_populates="user"
+    )
     id: Mapped[int] = mapped_column(
         Integer,
         primary_key=True
