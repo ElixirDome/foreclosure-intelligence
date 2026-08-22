@@ -1,4 +1,6 @@
 from pydantic import BaseModel
+from datetime import date
+from typing import Literal
 #Pydantic is a library for validating and shaping data — specifically, checking that Python objects (usually built from JSON) match a schema you define, and converting/rejecting them accordingly
 
 
@@ -11,6 +13,11 @@ class PropertyCreate(BaseModel):#inheriting from BaseModel means that Pydantic w
     bedrooms: int | None = None
     bathrooms: float | None = None#default value is none
     area_sqft: int | None = None
+    auction_date: date | None = None#The field is optional, and if omitted, its value is None.
+    foreclosure_status: str | None = None
+    opening_bid: float | None = None
+    estimated_value: float | None = None
+    property_type: str | None = None
 
 class PropertyResponse(BaseModel):
     id: int
@@ -19,6 +26,13 @@ class PropertyResponse(BaseModel):
     bedrooms: int | None
     bathrooms: float | None
     area_sqft: int | None
+    auction_date: date | None #It can be date or None, but the field itself is required.
+    foreclosure_status: str | None
+    opening_bid: float | None
+    estimated_value: float | None
+    property_type: str | None
+    discount_percentage: float | None = None
+    deal_score: float | None = None
 
 class PropertyUpdate(BaseModel):
     address: str | None = None
@@ -26,6 +40,17 @@ class PropertyUpdate(BaseModel):
     bedrooms: int | None = None
     bathrooms: float | None = None
     area_sqft: int | None = None
+    auction_date: date | None=None
+    foreclosure_status: Literal[#Purpose: Literal["value"] allows type checkers (like mypy) to verify that a variable only holds specific allowed values (e.g., Literal["yes", "no"]).
+        "scheduled",
+        "upcoming",
+        "active",
+        "sold",
+        "cancelled",
+    ] | None = None
+    opening_bid: float | None=None
+    estimated_value: float | None=None
+    property_type: str | None=None
 
 class UserCreate(BaseModel):
     email: str
@@ -51,3 +76,12 @@ class PropertyListResponse(BaseModel):
     limit: int
     total: int
     pages: int
+
+class PropertyAnalysis(BaseModel):
+    estimated_value: float | None
+    opening_bid: float | None
+    discount_amount: float | None
+    discount_percentage: float | None
+    deal_rating: str | None
+    deal_score: float | None
+

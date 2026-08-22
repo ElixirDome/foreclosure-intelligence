@@ -1,6 +1,8 @@
-from sqlalchemy import Integer, Numeric, String, ForeignKey
+from sqlalchemy import Integer, Numeric, String, ForeignKey, Date
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column,relationship
 from app.database import Base
+from datetime import date
+
 #SQLAlchemy model Represents the database.
 #Python class that represents one table in your database. Each class attribute maps to one column. It's the bridge that lets you write Python code instead of raw SQL strings to interact with the database.
 
@@ -36,6 +38,30 @@ class Property(Base):
 
     area_sqft: Mapped[int | None] = mapped_column(
         Integer
+    )
+    auction_date: Mapped[date | None] = mapped_column(
+    Date,
+    nullable=True
+    )
+
+    foreclosure_status: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )
+
+    opening_bid: Mapped[float | None] = mapped_column(
+        Numeric,
+        nullable=True
+    )
+
+    estimated_value: Mapped[float | None] = mapped_column(
+        Numeric,
+        nullable=True
+    )
+
+    property_type: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
     )
 
 
