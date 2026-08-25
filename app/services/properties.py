@@ -212,7 +212,7 @@ def get_properties(#service signature
         "discount_percentage": discount,
         "deal_score": score,
     }
-    properties.append(property) 
+    properties.append(property_data)#properties.append(property) So you're returning the raw Property object instead of the property_data dictionary containing the calculated values.
 
     pages = ceil(total / limit)
 

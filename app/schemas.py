@@ -14,7 +14,13 @@ class PropertyCreate(BaseModel):#inheriting from BaseModel means that Pydantic w
     bathrooms: float | None = None#default value is none
     area_sqft: int | None = None
     auction_date: date | None = None#The field is optional, and if omitted, its value is None.
-    foreclosure_status: str | None = None
+    foreclosure_status: Literal[#Purpose: Literal["value"] allows type checkers (like mypy) to verify that a variable only holds specific allowed values (e.g., Literal["yes", "no"]).
+        "scheduled",
+        "upcoming",
+        "active",
+        "sold",
+        "cancelled",
+    ] | None = None  
     opening_bid: float | None = None
     estimated_value: float | None = None
     property_type: str | None = None
@@ -84,4 +90,11 @@ class PropertyAnalysis(BaseModel):
     discount_percentage: float | None
     deal_rating: str | None
     deal_score: float | None
+
+class PropertyAIAnalysis(BaseModel):
+    summary: str
+    strengths: list[str]
+    risks: list[str]
+    due_diligence: list[str]
+    recommendation: str
 

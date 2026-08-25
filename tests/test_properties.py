@@ -1,65 +1,22 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-from fastapi.testclient import TestClient
+import pytest
+# Pytest handles that connection automatically.
 
-from app.models import User, Property
-from app.main import app
-from app.database import Base, get_db
-from app.security import get_current_user
+# So the pattern is:
 
-TEST_DATABASE_URL = "sqlite://"
+# conftest.py
+#     ↓
+# @pytest.fixture
+# def client():
+#     ...
+#     ↓
+# test_properties.py
+#     ↓
+# def test_create_property(client):
 
-test_engine = create_engine(
-    TEST_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-
-TestingSessionLocal = sessionmaker(
-    bind=test_engine,
-)
+# That's one of the nice things about pytest fixtures.
 
 
-def override_get_db():
-    db = TestingSessionLocal()
-
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
-
-Base.metadata.create_all(bind=test_engine)
-#----------------------------------------------------
-db = TestingSessionLocal()
-
-test_user = User(
-    id=1,
-    email="test@example.com",
-    password_hash="test-hash",
-    role="user",
-)
-
-db.add(test_user)
-db.commit()
-db.close()
-#---------------------------------------------
-def override_get_current_user():
-    return User(
-        id=1,
-        email="test@example.com",
-        password_hash="test-hash",
-        role="user",
-    )
-#register the override:
-app.dependency_overrides[get_current_user] = override_get_current_user
-#---------------------------------------------
-client = TestClient(app)
-
-def test_create_property():
+def test_create_property(client):
     response = client.post(
         "/properties/",
         json={
@@ -85,21 +42,241 @@ def test_create_property():
     assert data["opening_bid"] == 300000
     assert data["estimated_value"] == 500000
 
-    def test_create_property_invalid_foreclosure_status():
-        response = client.post(
-            "/properties/",
-            json={
-                "address": "123 Invalid Street",
-                "price": 500000,
-                "bedrooms": 3,
-                "bathrooms": 2,
-                "area_sqft": 1800,
-                "auction_date": "2026-08-22",
-                "foreclosure_status": "banana",
-                "opening_bid": 300000,
-                "estimated_value": 500000,
-                "property_type": "single_family",
-            },
-        )
+def test_create_property_invalid_foreclosure_status(client):
+    response = client.post(
+        "/properties/",
+        json={
+            "address": "123 Invalid Street",
+            "price": 500000,
+            "bedrooms": 3,
+            "bathrooms": 2,
+            "area_sqft": 1800,
+            "auction_date": "2026-08-22",
+            "foreclosure_status": "banana",
+            "opening_bid": 300000,
+            "estimated_value": 500000,
+            "property_type": "single_family",
+        },
+    )
 
-        assert response.status_code == 422
+    assert response.status_code == 422
+
+def test_property_analysis(client):
+    response = client.post(
+        "/properties/",
+        json={
+            "address": "123 Analysis Street",
+            "price": 100000,
+            "bedrooms": 3,
+            "bathrooms": 2,
+            "area_sqft": 1500,
+            "auction_date": "2026-08-22",
+            "foreclosure_status": "active",
+            "opening_bid": 60000,
+            "estimated_value": 90000,
+            "property_type": "single_family",
+        },
+    )
+
+    assert response.status_code == 201
+
+    property_id = response.json()["id"]
+
+    analysis_response = client.get(
+        f"/properties/{property_id}/analysis"
+    )
+
+    assert analysis_response.status_code == 200
+
+    analysis = analysis_response.json()
+
+    assert analysis["discount_amount"] == 30000
+    assert analysis["discount_percentage"] == pytest.approx(33.333333333333336)
+    assert analysis["deal_score"] == pytest.approx(23.333333333333336)
+
+def test_property_analysis_rejects_zero_estimated_value(client):
+    response = client.post(
+        "/properties/",
+        json={
+            "address": "123 Zero Value Street",
+            "price": 100000,
+            "bedrooms": 3,
+            "bathrooms": 2,
+            "area_sqft": 1500,
+            "auction_date": "2026-08-22",
+            "foreclosure_status": "active",
+            "opening_bid": 60000,
+            "estimated_value": 0,
+            "property_type": "single_family",
+        },
+    )
+
+    assert response.status_code == 201
+
+    property_id = response.json()["id"]
+
+    analysis_response = client.get(
+        f"/properties/{property_id}/analysis"
+    )
+
+    assert analysis_response.status_code == 400
+
+    assert analysis_response.json()["detail"] == (
+        "Deal analysis requires estimated_value greater than 0"
+    )    
+
+def test_property_analysis_rejects_missing_opening_bid(client): 
+    response = client.post(
+        "/properties/",
+        json={
+            "address": "123 Missing Bid Street",
+            "price": 100000,
+            "bedrooms": 3,
+            "bathrooms": 2,
+            "area_sqft": 1500,
+            "auction_date": "2026-08-22",
+            "foreclosure_status": "active",
+            "opening_bid": None,
+            "estimated_value": 90000,
+            "property_type": "single_family",
+        },
+    )
+
+    assert response.status_code == 201
+
+    property_id = response.json()["id"]
+
+    analysis_response = client.get(
+        f"/properties/{property_id}/analysis"
+    )
+
+    assert analysis_response.status_code == 400
+
+    assert analysis_response.json()["detail"] == (
+        "Deal analysis requires opening_bid"
+    )
+
+def test_list_properties(client):
+    client.post(
+        "/properties/",
+        json={
+            "address": "123 List Street",
+            "price": 100000,
+            "bedrooms": 3,
+            "bathrooms": 2,
+            "area_sqft": 1500,
+            "auction_date": "2026-08-22",
+            "foreclosure_status": "active",
+            "opening_bid": 60000,
+            "estimated_value": 90000,
+            "property_type": "single_family",
+        },
+    )
+
+    response = client.get("/properties/")
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total"] == 1
+    assert data["page"] == 1
+    assert data["limit"] == 20
+    assert data["pages"] == 1
+    assert len(data["items"]) == 1
+
+    item = data["items"][0]
+
+    assert item["address"] == "123 List Street"
+    assert item["discount_percentage"] == pytest.approx(33.333333333333336)
+    assert item["deal_score"] == pytest.approx(23.333333333333336)
+
+def test_list_properties_filters_by_foreclosure_status(client):
+    client.post(
+        "/properties/",
+        json={
+            "address": "Active Property",
+            "price": 100000,
+            "bedrooms": 3,
+            "bathrooms": 2,
+            "area_sqft": 1500,
+            "auction_date": "2026-08-22",
+            "foreclosure_status": "active",
+            "opening_bid": 60000,
+            "estimated_value": 90000,
+            "property_type": "single_family",
+        },
+    )
+
+    client.post(
+        "/properties/",
+        json={
+            "address": "Open Property",
+            "price": 200000,
+            "bedrooms": 4,
+            "bathrooms": 3,
+            "area_sqft": 2000,
+            "auction_date": "2026-08-23",
+            "foreclosure_status": "open",
+            "opening_bid": 120000,
+            "estimated_value": 180000,
+            "property_type": "single_family",
+        },
+    )
+
+    response = client.get(
+        "/properties/",
+        params={"foreclosure_status": "active"},
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total"] == 1
+    assert data["items"][0]["address"] == "Active Property"
+
+def test_list_properties_filters_by_discount(client):
+    client.post(
+        "/properties/",
+        json={
+            "address": "Good Deal",
+            "price": 100000,
+            "bedrooms": 3,
+            "bathrooms": 2,
+            "area_sqft": 1500,
+            "auction_date": "2026-08-22",
+            "foreclosure_status": "active",
+            "opening_bid": 50000,
+            "estimated_value": 100000,
+            "property_type": "single_family",
+        },
+    )
+
+    client.post(
+        "/properties/",
+        json={
+            "address": "Small Deal",
+            "price": 100000,
+            "bedrooms": 3,
+            "bathrooms": 2,
+            "area_sqft": 1500,
+            "auction_date": "2026-08-23",
+            "foreclosure_status": "active",
+            "opening_bid": 90000,
+            "estimated_value": 100000,
+            "property_type": "single_family",
+        },
+    )
+
+    response = client.get(
+        "/properties/",
+        params={"min_discount": 30},
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total"] == 1
+    assert data["items"][0]["address"] == "Good Deal"    
