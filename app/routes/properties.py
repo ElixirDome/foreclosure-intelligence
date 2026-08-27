@@ -13,10 +13,13 @@ from app.services.properties import (
 )
 from app.database import SessionLocal,get_db
 from app.models import Property, User
-from app.schemas import PropertyResponse,PropertyListResponse,PropertyCreate,PropertyUpdate,PropertyAnalysis #didn't import it lost 10 mins
+from app.schemas import PropertyResponse,PropertyListResponse,PropertyCreate,PropertyUpdate,PropertyAnalysis,PropertyAIAnalysis #didn't import it lost 10 mins
 from app.security import (get_current_user, require_role,
                           require_property_owner #
                           )
+from app.dependencies import get_llm_provider
+from app.services.llm import LLMProvider
+from app.services.properties import analyze_property_with_ai
 
 router = APIRouter(prefix="/properties",tags=["properties"])
 
@@ -91,6 +94,25 @@ def analyze_property_route(
     )
 
     return analyze_property(property)
+
+@router.get(
+    "/{property_id}/analysis/ai",
+    response_model=PropertyAIAnalysis,
+)
+def analyze_property_ai_route(
+    property_id: int,
+    db: Session = Depends(get_db),
+    provider: LLMProvider = Depends(get_llm_provider),
+):
+    property = get_property_by_id(
+        property_id=property_id,
+        db=db,
+    )
+
+    return analyze_property_with_ai(
+        property=property,
+        provider=provider,
+    )
 
 @router.get(
     "/{property_id}",

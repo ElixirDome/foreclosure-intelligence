@@ -1,4 +1,11 @@
 import pytest
+from app.services.properties import analyze_property_with_ai
+from app.services.llm import LLMProvider
+from app.schemas import PropertyAIAnalysis
+from app.dependencies import get_llm_provider
+from app.main import app
+from app.models import Property
+
 # Pytest handles that connection automatically.
 
 # So the pattern is:
@@ -280,3 +287,90 @@ def test_list_properties_filters_by_discount(client):
 
     assert data["total"] == 1
     assert data["items"][0]["address"] == "Good Deal"    
+
+def test_analyze_property_with_ai(fake_llm_provider,db):
+    property = Property(
+        user_id=1,
+        address="123 Main Street",
+        price=60000,
+        bedrooms=3,
+        bathrooms=2,
+        area_sqft=1500,
+        foreclosure_status="active",
+        opening_bid=60000,
+        estimated_value=90000,
+    )
+
+    db.add(property)
+    db.commit()
+    db.refresh(property)
+
+    result = analyze_property_with_ai(
+        property=property,
+        provider=fake_llm_provider,
+    )
+
+    assert isinstance(result, PropertyAIAnalysis)
+    assert result.summary == "Test property analysis."    
+
+def test_property_ai_analysis(client, fake_llm_provider,db):
+    app.dependency_overrides[get_llm_provider] = (
+        lambda: fake_llm_provider
+    )
+
+#     The route is registered. The 404 is therefore almost certainly coming from this:
+
+# property = get_property_by_id(
+#     property_id=property_id,
+#     db=db,
+# )
+
+# Your client fixture creates a test user, but it doesn't create a property with id=1.
+
+# So the request reaches:
+
+# GET /properties/1/analysis/ai
+#         ↓
+# AI route ✅
+#         ↓
+# get_property_by_id(1)
+#         ↓
+# property doesn't exist ❌
+#         ↓
+# 404
+
+# That's actually a great debugging lesson: a 404 doesn't necessarily mean the route wasn't found. The endpoint itself can return a 404 because the resource doesn't exist.
+
+# Fix the test
+
+# Inside test_property_ai_analysis, create the property before making the request.
+    test_property = Property( 
+        id=1,         # struck the not null constraind then added userid but 'userid' is an invalid keyword argument for Property canged it to user_id the actual column name
+        user_id=1,
+        address="123 Main Street",
+        price=60000,
+        bedrooms=3,
+        bathrooms=2,
+        area_sqft=1500,
+        foreclosure_status="active",
+        opening_bid=60000,
+        estimated_value=90000,
+    )
+
+    db.add(test_property)
+    db.commit()
+
+
+    response = client.get("/properties/1/analysis/ai")
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["summary"] == "Test property analysis."
+    assert data["strengths"] == ["Good discount"]
+    assert data["risks"] == ["Foreclosure risk"]
+    assert data["due_diligence"] == ["Review foreclosure documents"]
+    assert data["recommendation"] == "Investigate further."
+
+    app.dependency_overrides.clear()    

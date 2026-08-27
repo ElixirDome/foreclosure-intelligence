@@ -7,6 +7,10 @@ from app.models import Property
 from app.database import get_db
 from fastapi import HTTPException
 from app.schemas import PropertyCreate
+from app.services.llm import (
+    LLMProvider,
+    generate_property_analysis,
+)
 
 DEAL_SCORE_RISK_MULTIPLIER = 5#Don't put it inside calculate_deal_score() if both calculate_deal_score() and get_properties() need it. Put it at module level.
 FORECLOSURE_RISK_LEVELS = {
@@ -145,16 +149,16 @@ def get_properties(#service signature
         ) <= max_discount
     )
      
-     if foreclosure_status is not None:
+    if foreclosure_status is not None:
       query = query.filter(
         Property.foreclosure_status == foreclosure_status
     )
-      if auction_date_from is not None:
+    if auction_date_from is not None:
        query = query.filter(
         Property.auction_date >= auction_date_from
     )
 
-     if auction_date_to is not None:
+    if auction_date_to is not None:
       query = query.filter(
         Property.auction_date <= auction_date_to
     )
@@ -293,7 +297,9 @@ def calculate_deal_score(
 
     return max(0, min(score, 100))
     
-
+# Layer 1 — deterministic
+# analyze_property()
+# It should always produce the same answer for the same property.
 def analyze_property(
     property: Property
 ):
@@ -352,3 +358,29 @@ def analyze_property(
         "deal_rating": deal_rating,
         "deal_score": score,
     }
+
+#It takes those facts and asks the LLM to interpret them.
+def analyze_property_with_ai(
+    property: Property,
+    provider: LLMProvider,
+):
+    deterministic_analysis = analyze_property(property)
+
+    property_data = {
+        "address": property.address,
+        "property_type": property.property_type,
+        "price": property.price,
+        "bedrooms": property.bedrooms,
+        "bathrooms": property.bathrooms,
+        "area_sqft": property.area_sqft,
+        "auction_date": property.auction_date,
+        "foreclosure_status": property.foreclosure_status,
+        "opening_bid": property.opening_bid,
+        "estimated_value": property.estimated_value,
+    }
+
+    return generate_property_analysis(
+        property_data=property_data,
+        analysis_data=deterministic_analysis,
+        provider=provider,
+    )

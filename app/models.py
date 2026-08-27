@@ -40,9 +40,9 @@ class Property(Base):
         Integer
     )
     auction_date: Mapped[date | None] = mapped_column(
-    Date,
-    nullable=True
-    )
+        Date,
+        nullable=True
+    )##
 
     foreclosure_status: Mapped[str | None] = mapped_column(
         String,
