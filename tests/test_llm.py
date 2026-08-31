@@ -1,4 +1,4 @@
-from app.services.llm import build_property_analysis_prompt, LocalLLMProvider, generate_property_analysis
+from app.services.llm import build_property_analysis_prompt, LocalLLMProvider, generate_property_analysis,parse_property_ai_analysis
 import ollama
 from app.schemas import PropertyAIAnalysis
 
@@ -89,5 +89,22 @@ def test_generate_property_analysis_with_fake_provider(fake_llm_provider):
     )
 
     assert isinstance(result, PropertyAIAnalysis)
-    assert result.summary == "Test property analysis."    
+    assert result.summary == "Test property analysis."
+
+def test_parse_property_ai_analysis_with_markdown_json():
+    content = """```json
+{
+    "summary": "Good opportunity",
+    "strengths": ["Strong discount"],
+    "risks": ["Foreclosure risk"],
+    "due_diligence": ["Verify title"],
+    "recommendation": "Investigate further."
+}
+```"""
+
+    result = parse_property_ai_analysis(content)
+
+    assert isinstance(result, PropertyAIAnalysis)
+    assert result.summary == "Good opportunity"
+    assert result.recommendation == "Investigate further."
    

@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
+import os
 
-import ollama
-
+from ollama import Client, ResponseError
 from app.schemas import PropertyAIAnalysis
+from ollama import ResponseError
 
 
 def build_property_analysis_prompt(
@@ -29,7 +30,6 @@ Your analysis should help an investor understand the
 potential opportunity, risks, and recommended due diligence.
 
 The response must provide all of these fields:
-
 - summary: a concise overall interpretation
 - strengths: important positive factors
 - risks: important risks or uncertainties
@@ -82,26 +82,76 @@ class LLMProvider(ABC):
         pass
 
 
+# the model may return JSON wrapped in Markdown fences.
+### Add a small parser
+def parse_property_ai_analysis(
+    content: str,
+) -> PropertyAIAnalysis:
+    content = content.strip()
+
+    if content.startswith("```"):
+        lines = content.splitlines()
+
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+
+        content = "\n".join(lines).strip()
+
+    return PropertyAIAnalysis.model_validate_json(content)
+
 class LocalLLMProvider(LLMProvider):
 
-    def __init__(self, model: str = "llama3.2:3b"):
-        self.model = model
+    def __init__(
+        self,
+        model: str | None = None,
+        timeout: float | None = None,
+    ):
+        self.model = model or os.getenv(
+            "OLLAMA_MODEL",
+            "llama3.2:3b",
+        )
+
+        self.timeout = timeout or float(
+            os.getenv("OLLAMA_TIMEOUT", "60")
+        )
+
+        self.client = Client(
+            host=os.getenv(
+                "OLLAMA_HOST",
+                "http://localhost:11434",
+            ),
+            timeout=self.timeout,
+        )
 
     def generate(self, prompt: str) -> PropertyAIAnalysis:
-        response = ollama.chat(
-            model=self.model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-            format=PropertyAIAnalysis.model_json_schema(),#We're giving Ollama the schema describing the structure we expect.
-        )
+        try:
+            response = self.client.chat(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                format=PropertyAIAnalysis.model_json_schema(),
+            )
 
-        return PropertyAIAnalysis.model_validate_json(
-            response["message"]["content"]
-        )
+            return parse_property_ai_analysis(
+                response["message"]["content"]
+            )
+
+        except ResponseError as e:
+            raise RuntimeError(
+                f"Ollama error: {e.error}"
+            ) from e
+
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to generate AI property analysis"
+            ) from e
 
 
 def generate_property_analysis(
