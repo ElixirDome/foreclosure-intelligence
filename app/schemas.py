@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from datetime import date
+from pydantic import BaseModel,ConfigDict
+from datetime import datetime, date
 from typing import Literal
 #Pydantic is a library for validating and shaping data — specifically, checking that Python objects (usually built from JSON) match a schema you define, and converting/rejecting them accordingly
 
@@ -24,8 +24,11 @@ class PropertyCreate(BaseModel):#inheriting from BaseModel means that Pydantic w
     opening_bid: float | None = None
     estimated_value: float | None = None
     property_type: str | None = None
+    survey_number: str | None = None
 
 class PropertyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     address: str
     price: float | None
@@ -37,6 +40,7 @@ class PropertyResponse(BaseModel):
     opening_bid: float | None
     estimated_value: float | None
     property_type: str | None
+    survey_number: str | None = None
     discount_percentage: float | None = None
     deal_score: float | None = None
 
@@ -57,7 +61,7 @@ class PropertyUpdate(BaseModel):
     opening_bid: float | None=None
     estimated_value: float | None=None
     property_type: str | None=None
-
+    survey_number: str | None = None
 class UserCreate(BaseModel):
     email: str
     password: str
@@ -98,3 +102,31 @@ class PropertyAIAnalysis(BaseModel):
     due_diligence: list[str]
     recommendation: str
 
+class ExtractedProperty(BaseModel):
+    lot_number: str | None = None
+    document_number: str | None = None
+
+    property_type: str | None = None
+    category: str | None = None
+    sub_category: str | None = None
+
+    defaulter_name: str | None = None
+
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    pincode: str | None = None
+
+    area_sqft: float | None = None
+    survey_number: str | None = None
+
+    opening_bid: float | None = None
+    pre_bid_emd: float | None = None
+    minimum_increment: float | None = None
+    post_bid_emd_percent: float | None = None
+
+    auction_number: str | None = None
+    auction_start: datetime | None = None
+    auction_close: datetime | None = None
+
+    seller_name: str | None = None

@@ -1,5 +1,11 @@
+from unittest import result
+
 from fastapi import (APIRouter,Query,
-Depends,status, HTTPException)
+Depends,status, HTTPException,
+File,UploadFile)
+
+from pathlib import Path
+import tempfile
 from sqlalchemy.orm import Session
 from math import ceil
 from datetime import date
@@ -10,6 +16,7 @@ from app.services.properties import (
     get_property_by_id,
     analyze_property,
     get_property_or_404,
+    save_extracted_properties
 )
 from app.database import SessionLocal,get_db
 from app.models import Property, User
@@ -20,6 +27,9 @@ from app.security import (get_current_user, require_role,
 from app.dependencies import get_llm_provider
 from app.services.llm import LLMProvider
 from app.services.properties import analyze_property_with_ai
+from app.services.pdf import extract_text_from_pdf
+from app.services.extraction import extract_properties_from_text
+
 
 router = APIRouter(prefix="/properties",tags=["properties"])
 
@@ -36,6 +46,7 @@ def get_properties_route(
     sort_by: str = Query("id"),
     order: str = Query("asc"),
     db: Session = Depends(get_db),
+    
     min_area: int | None = Query(None, ge=0),
     max_area: int | None = Query(None, ge=0),
     min_discount: float | None = Query(None, ge=0, le=100),
@@ -58,6 +69,7 @@ def get_properties_route(
     try:
         return get_properties(
             db=db,#for the parameter named db in get_properties's signature, use the value currently held by my local variable also named db.
+          
             page=page,
             limit=limit,
             min_price=min_price,
@@ -72,6 +84,7 @@ def get_properties_route(
             foreclosure_status=foreclosure_status,
             auction_date_from=auction_date_from,
             auction_date_to=auction_date_to,
+            
         )
 
     except ValueError as e:
@@ -178,3 +191,54 @@ def update_property_route(
         property=property,
         update_data=update_data
     )
+
+@router.post("/import")
+def import_properties_from_pdf(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are supported",
+        )
+
+    with tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=".pdf",
+    ) as temp_file:
+
+        temp_file.write(file.file.read())
+        temp_path = Path(temp_file.name)
+
+    try:
+        text = extract_text_from_pdf(temp_path)
+
+        extracted_properties = extract_properties_from_text(text)
+
+        if not extracted_properties:
+            raise HTTPException(
+                status_code=400,
+                detail="No properties could be extracted from PDF",
+            )
+
+        result = save_extracted_properties(
+    db=db,
+    properties=extracted_properties,
+    user_id=current_user.id,
+)
+
+        saved_properties = result["saved"]
+        skipped_properties = result["skipped"]
+
+        return {
+            "message": "Properties imported successfully",
+            "saved_count": len(saved_properties),
+            "skipped_count": len(skipped_properties),
+            "properties": saved_properties,
+            "skipped": skipped_properties,
+        }
+
+    finally:
+        temp_path.unlink(missing_ok=True)

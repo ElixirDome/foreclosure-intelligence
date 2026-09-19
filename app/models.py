@@ -63,6 +63,18 @@ class Property(Base):
         String,
         nullable=True
     )
+    
+    survey_number: Mapped[str | None] = mapped_column(
+    String,
+    nullable=True,
+    )
+    
+    property_key: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        unique=True,
+        index=True,
+    )
 
 
 class User(Base):

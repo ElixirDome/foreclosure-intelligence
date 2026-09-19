@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
 import os
-
+from dotenv import load_dotenv
 from ollama import Client, ResponseError
 from app.schemas import PropertyAIAnalysis
 from ollama import ResponseError
 
+load_dotenv()
 
 def build_property_analysis_prompt(
     property_data: dict,

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pwdlib import PasswordHash
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
-from app.database import SessionLocal,get_db
+from app.database import get_db
 from app.models import User
 from app.schemas import UserCreate, UserResponse, UserLogin,Token
 from app.security import verify_password, create_access_token
@@ -13,9 +13,7 @@ router = APIRouter(
     tags=["authentication"]
 )
 
-
 password_hash = PasswordHash.recommended()
-
 
 @router.post(
     "/register",
@@ -82,6 +80,11 @@ def login(
         raise HTTPException(
             form_data.password,
              user.password_hash
+        )
+    if not verify_password(form_data.password, user.password_hash):#When the email doesn't match a row, user is None, so user.password_hash crashes.
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
         )
 
     if not verify_password(

@@ -4,13 +4,14 @@ from sqlalchemy import and_, case
 from math import ceil
 from datetime import date
 from app.models import Property
-from app.database import get_db
+
 from fastapi import HTTPException
-from app.schemas import PropertyCreate
+from app.schemas import PropertyCreate, ExtractedProperty
 from app.services.llm import (
     LLMProvider,
     generate_property_analysis,
 )
+from app.services.normalization import create_property_key
 
 DEAL_SCORE_RISK_MULTIPLIER = 5#Don't put it inside calculate_deal_score() if both calculate_deal_score() and get_properties() need it. Put it at module level.
 FORECLOSURE_RISK_LEVELS = {
@@ -31,9 +32,17 @@ def create_property(
     property_data: PropertyCreate,
     user_id: int
 ):
+    property_key = create_property_key(
+        address=property_data.address,
+        area_sqft=property_data.area_sqft,
+        property_type=property_data.property_type,
+        survey_number=property_data.survey_number,
+    )
+
     property = Property(
         **property_data.model_dump(),
-        user_id=user_id#because the authenticated user's ID should not come from the client's JSON.
+        user_id=user_id,
+        property_key=property_key,
     )
 
     db.add(property)
@@ -42,8 +51,75 @@ def create_property(
 
     return property
 
+def save_extracted_properties(
+    db: Session,
+    properties: list[ExtractedProperty],
+    user_id: int,
+):
+    saved_properties = []
+    skipped_properties = []
+
+    for extracted in properties:
+
+        property_key = create_property_key(
+            address=extracted.address or "Unknown",
+            area_sqft=extracted.area_sqft,
+            property_type=extracted.property_type,
+            survey_number=extracted.survey_number,
+        )
+
+        existing_property = (
+            db.query(Property)
+            .filter(Property.property_key == property_key)
+            .first()
+        )
+
+        if existing_property:
+           if existing_property:
+            skipped_properties.append({
+                "property_id": existing_property.id,
+                "address": existing_property.address,
+                "reason": "duplicate",
+            })
+            continue
+
+        property_obj = Property(
+            user_id=user_id,
+            address=extracted.address or "Unknown",
+            price=extracted.opening_bid,
+            area_sqft=(
+                int(extracted.area_sqft)
+                if extracted.area_sqft is not None
+                else None
+            ),
+            opening_bid=extracted.opening_bid,
+            property_type=extracted.property_type,
+            survey_number=extracted.survey_number,
+            auction_date=(
+                extracted.auction_start.date()
+                if extracted.auction_start is not None
+                else None
+            ),
+            foreclosure_status="scheduled",
+            property_key=property_key,
+        )
+
+        db.add(property_obj)
+        saved_properties.append(property_obj)
+
+    db.commit()
+
+    for property_obj in saved_properties:
+        db.refresh(property_obj)
+
+    return {
+        "saved": saved_properties,
+        "skipped": skipped_properties,
+    }
+
 def get_properties(#service signature
     db: Session,
+  
     page: int,
     limit: int,
     min_price: int | None,
@@ -103,7 +179,7 @@ def get_properties(#service signature
     query = db.query(Property,discount_percentage,
                      deal_score)#Yep — I see the bug immediately. Your filtering logic is correct. The problem is that you build the filtered query, but then you throw it away when fetching the properties.
 #UnboundLocalError: cannot access local variable 'discount_percentage' where it is not associated with a value
-
+  
 ####3##########3 SQL filters
     if min_price is not None:
         query = query.filter(Property.price >= min_price)
@@ -227,36 +303,42 @@ def get_properties(#service signature
         "total": total,
         "pages": pages
     }
-
 def update_property(
     db: Session,
-    property: Property,#Notice that the service receives the already-authorized property.Authentication/authorization stays outside the service.
+    property: Property,
     update_data: dict
 ):
-    print("UPDATE DATA:", update_data)
-
     allowed_fields = {
-    "address",
-    "price",
-    "bedrooms",
-    "bathrooms",
-    "area_sqft",
-    "auction_date",
-    "foreclosure_status",
-    "opening_bid",
-    "estimated_value",
-    "property_type"
-}
+        "address",
+        "price",
+        "bedrooms",
+        "bathrooms",
+        "area_sqft",
+        "auction_date",
+        "foreclosure_status",
+        "opening_bid",
+        "estimated_value",
+        "property_type",
+        "survey_number",
+    }
+
     for field, value in update_data.items():
         if field in allowed_fields:
-         setattr(property, field, value)
+            setattr(property, field, value)
+
+    property.property_key = create_property_key(
+        address=property.address,
+        area_sqft=property.area_sqft,
+        property_type=property.property_type,
+        survey_number=property.survey_number,
+    )
 
     try:
         db.commit()
         db.refresh(property)
 
     except SQLAlchemyError:
-        db.rollback()  
+        db.rollback()
         raise
 
     return property
@@ -283,7 +365,7 @@ def get_property_or_404(# helper function
             status_code=404,
             detail="Property not found"
         )
-
+    
     return property    
     
 def calculate_deal_score(

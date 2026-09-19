@@ -10,7 +10,7 @@ import jwt
 from dotenv import load_dotenv
 from pwdlib import PasswordHash
 from datetime import datetime, timedelta, timezone
-from fastapi import Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
 
@@ -19,6 +19,8 @@ load_dotenv()
 oauth2_scheme = OAuth2PasswordBearer(#"When an endpoint requires authentication, look for a Bearer token in the Authorization header."
     tokenUrl="/auth/login"
 )
+
+router = APIRouter()
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -36,12 +38,10 @@ def get_current_user(
 
     try:
         payload = decode_access_token(token)
-
         user_id = payload.get("sub")
 
         if user_id is None:
             raise credentials_exception
-
         user_id = int(user_id)
 
     except (jwt.InvalidTokenError, ValueError):
@@ -113,6 +113,7 @@ def decode_access_token(token: str) -> dict:
     # expiration verification
     #  ↓
     # payload
+    
 def require_role(required_role: str):
 
     def role_checker(
