@@ -1,7 +1,7 @@
-from sqlalchemy import Integer, Numeric, String, ForeignKey, Date
+from sqlalchemy import Integer, Numeric, String, ForeignKey, Date, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column,relationship
 from app.database import Base
-from datetime import date
+from datetime import date, datetime  
 
 #SQLAlchemy model Represents the database.
 #Python class that represents one table in your database. Each class attribute maps to one column. It's the bridge that lets you write Python code instead of raw SQL strings to interact with the database.
@@ -104,4 +104,63 @@ class User(Base):
         String,
         default="user",
         nullable=False
+    )
+
+class IngestionRun(Base):
+    __tablename__ = "ingestion_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_name: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    items_found: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    items_created: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    items_skipped: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    source_name: Mapped[str] = mapped_column(String, nullable=False)
+    source_url: Mapped[str] = mapped_column(String, nullable=False)
+
+    document_type: Mapped[str] = mapped_column(String, nullable=False)
+
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    content_hash: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+
+class PropertyDocument(Base):
+    __tablename__ = "property_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    property_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("properties.id"),
+        nullable=False,
+    )
+
+    document_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("documents.id"),
+        nullable=False,
+    )
+
+    relationship_type: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
     )

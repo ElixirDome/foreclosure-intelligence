@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import api from "../api/client";
 
 interface Property {
@@ -28,6 +28,12 @@ interface PropertyResponse {
 }
 
 function Dashboard() {
+  const navigate = useNavigate();
+
+  function handleLogout() {
+    localStorage.removeItem("access_token");
+    navigate("/login");
+  }
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -105,7 +111,13 @@ function Dashboard() {
 
   return (
     <div className="page">
+      <nav className="navbar">
+        <Link to="/dashboard">Dashboard</Link>
+        <Link to="/admin/import">Import PDF</Link>
+        <button onClick={handleLogout}>Logout</button>
+      </nav>
       <header className="header">
+
         <h1>Foreclosure Intelligence</h1>
         <p>Find and analyze auction properties.</p>
       </header>

@@ -220,3 +220,68 @@ a {
   color: #dc2626;
   margin-bottom: 14px;
 }
+
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.navbar a {
+  font-weight: 600;
+}
+
+.navbar button {
+  margin-left: auto;
+  padding: 8px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+}
+/* Add the analysis styling */
+.analysis-container {
+  margin-top: 24px;
+  background: white;
+  padding: 32px;
+  border-radius: 12px;
+}
+
+.analysis-container h2 {
+  margin-top: 0;
+  margin-bottom: 24px;
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.analysis-card {
+  padding: 20px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.analysis-card strong {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.analysis-card span {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+@media (max-width: 800px) {
+  .analysis-grid {
+    grid-template-columns: 1fr;
+  }
+}

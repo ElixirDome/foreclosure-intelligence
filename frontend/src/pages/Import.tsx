@@ -48,10 +48,16 @@ function Import() {
       );
 
       setResult(response.data);
-    } catch (err) {
-      console.error(err);
-      setError("Import failed.");
-    } finally {
+    } catch (err: any) {
+  console.error(err);
+
+  const message =
+    err.response?.data?.detail ||
+    err.message ||
+    "Import failed.";
+
+  setError(message);
+} finally {
       setLoading(false);
     }
   }

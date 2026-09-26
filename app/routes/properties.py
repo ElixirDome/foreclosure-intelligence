@@ -16,7 +16,7 @@ from app.services.properties import (
     get_property_by_id,
     analyze_property,
     get_property_or_404,
-    save_extracted_properties
+   
 )
 from app.database import SessionLocal,get_db
 from app.models import Property, User
@@ -27,8 +27,6 @@ from app.security import (get_current_user, require_role,
 from app.dependencies import get_llm_provider
 from app.services.llm import LLMProvider
 from app.services.properties import analyze_property_with_ai
-from app.services.pdf import extract_text_from_pdf
-from app.services.extraction import extract_properties_from_text
 
 
 router = APIRouter(prefix="/properties",tags=["properties"])
@@ -191,7 +189,6 @@ def update_property_route(
         property=property,
         update_data=update_data
     )
-
 @router.post("/import")
 def import_properties_from_pdf(
     file: UploadFile = File(...),
@@ -213,31 +210,31 @@ def import_properties_from_pdf(
         temp_path = Path(temp_file.name)
 
     try:
-        text = extract_text_from_pdf(temp_path)
+        from app.ingestion.pdf_source import PDFSourceAdapter
+        from app.ingestion.pipeline import run_ingestion
+        from app.ingestion.save import save_ingested_properties
 
-        extracted_properties = extract_properties_from_text(text)
+        adapter = PDFSourceAdapter(temp_path)
 
-        if not extracted_properties:
-            raise HTTPException(
-                status_code=400,
-                detail="No properties could be extracted from PDF",
-            )
+        result = run_ingestion(
+            db=db,
+            adapter=adapter,
+        )
 
-        result = save_extracted_properties(
-    db=db,
-    properties=extracted_properties,
-    user_id=current_user.id,
-)
-
-        saved_properties = result["saved"]
-        skipped_properties = result["skipped"]
+        save_result = save_ingested_properties(
+            db=db,
+            properties=result["items"],
+            user_id=current_user.id,
+            ingestion_run_id=result["ingestion_run_id"],
+        )
 
         return {
             "message": "Properties imported successfully",
-            "saved_count": len(saved_properties),
-            "skipped_count": len(skipped_properties),
-            "properties": saved_properties,
-            "skipped": skipped_properties,
+            "saved_count": len(save_result["saved"]),
+            "skipped_count": len(save_result["skipped"]),
+            "properties": save_result["saved"],
+            "skipped": save_result["skipped"],
+            "ingestion_run_id": result["ingestion_run_id"],
         }
 
     finally:
