@@ -5,13 +5,14 @@ from math import ceil
 from datetime import date
 from app.models import Property
 
+from sqlalchemy import and_, case, func
+
 from fastapi import HTTPException
 from app.schemas import PropertyCreate, ExtractedProperty
-from app.services.llm import (
-    LLMProvider,
-    generate_property_analysis,
-)
+from app.services.llm import LLMProvider,generate_property_analysis
 from app.services.normalization import create_property_key
+
+from app.services.valuation import record_valuation
 
 DEAL_SCORE_RISK_MULTIPLIER = 5#Don't put it inside calculate_deal_score() if both calculate_deal_score() and get_properties() need it. Put it at module level.
 FORECLOSURE_RISK_LEVELS = {
@@ -122,6 +123,7 @@ def get_properties(#service signature
   
     page: int,
     limit: int,
+    search: str | None,
     min_price: int | None,
     max_price: int | None,
     bedrooms: int | None,
@@ -179,7 +181,10 @@ def get_properties(#service signature
     query = db.query(Property,discount_percentage,
                      deal_score)#Yep — I see the bug immediately. Your filtering logic is correct. The problem is that you build the filtered query, but then you throw it away when fetching the properties.
 #UnboundLocalError: cannot access local variable 'discount_percentage' where it is not associated with a value
-  
+    if search:
+        query = query.filter(
+            Property.address.ilike(f"%{search.strip()}%")
+        )
 ####3##########3 SQL filters
     if min_price is not None:
         query = query.filter(Property.price >= min_price)
@@ -283,18 +288,23 @@ def get_properties(#service signature
      property_data = {
         "id": property.id,
         "address": property.address,
+        "city": property.city,
+        "locality": property.locality,
         "price": property.price,
         "bedrooms": property.bedrooms,
-        "bathrooms": property.bathrooms,#Pydantic will take those dictionaries and validate them against PropertyResponse.
+        "bathrooms": property.bathrooms,
         "area_sqft": property.area_sqft,
         "auction_date": property.auction_date,
         "foreclosure_status": property.foreclosure_status,
         "opening_bid": property.opening_bid,
         "estimated_value": property.estimated_value,
         "property_type": property.property_type,
-        "discount_percentage": discount,
-        "deal_score": score,
-    }
+        # But the dictionary currently uses discount_percentage and deal_score, which are SQLAlchemy expressions.
+       "discount_percentage": (
+            float(discount) if discount is not None else None
+        ),
+        "deal_score": float(score) if score is not None else None,
+       }
      properties.append(property_data)#properties.append(property) So you're returning the raw Property object instead of the property_data dictionary containing the calculated values.
 #    ^
 #    |
@@ -387,47 +397,98 @@ def calculate_deal_score(
 # Layer 1 — deterministic
 # analyze_property()
 # It should always produce the same answer for the same property.
-def analyze_property(
-    property: Property
-):
-    if property.estimated_value is None or property.estimated_value <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Deal analysis requires estimated_value greater than 0"
+
+def analyze_property(property: Property):
+    valuation_confidence = None
+
+    # Get confidence from the latest valuation, if one exists
+    if property.valuations:
+        latest_valuation = max(
+            property.valuations,
+            key=lambda valuation: valuation.id,
         )
 
-    if property.opening_bid is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Deal analysis requires opening_bid"
-        )
+        if latest_valuation.confidence is not None:
+            valuation_confidence = float(
+                latest_valuation.confidence
+            )
 
-    discount_amount = (
-        property.estimated_value
-        - property.opening_bid
+    estimated_value = (
+        float(property.estimated_value)
+        if property.estimated_value is not None
+        else None
     )
+
+    opening_bid = (
+        float(property.opening_bid)
+        if property.opening_bid is not None
+        else None
+    )
+
+    # No estimated value yet
+    if estimated_value is None or estimated_value <= 0:
+        return {
+            "estimated_value": estimated_value,
+            "opening_bid": opening_bid,
+            "discount_amount": None,
+            "discount_percentage": None,
+            "price_per_sqft": None,
+            "potential_upside": None,
+            "risk_level": None,
+            "deal_rating": None,
+            "deal_score": None,
+            "valuation_confidence": valuation_confidence,
+        }
+
+    # Estimated value exists, but opening bid doesn't
+    if opening_bid is None:
+        return {
+            "estimated_value": estimated_value,
+            "opening_bid": None,
+            "discount_amount": None,
+            "discount_percentage": None,
+            "price_per_sqft": None,
+            "potential_upside": None,
+            "risk_level": None,
+            "deal_rating": None,
+            "deal_score": None,
+            "valuation_confidence": valuation_confidence,
+        }
+
+    discount_amount = estimated_value - opening_bid
 
     discount_percentage = (
-        discount_amount
-        / property.estimated_value
-        * 100
-    )
-    
+        discount_amount / estimated_value
+    ) * 100
+
+    price_per_sqft = None
+
+    if property.area_sqft is not None and property.area_sqft > 0:
+        price_per_sqft = opening_bid / property.area_sqft
+
     status = (
-    property.foreclosure_status.lower()
-    if property.foreclosure_status
-    else None
-)
+        property.foreclosure_status.lower()
+        if property.foreclosure_status
+        else None
+    )
+
     risk_level = FORECLOSURE_RISK_LEVELS.get(
-    status,
-    2
-)
-    risk_level = FORECLOSURE_RISK_LEVELS.get(status, 2)
-    score = calculate_deal_score(
-    discount_percentage,
-    risk_level
-)
-  
+        status,
+        2,
+    )
+
+    base_score = calculate_deal_score(
+        float(discount_percentage),
+        risk_level,
+    )
+
+    if valuation_confidence is not None:
+        confidence_adjusted_score = (
+            base_score * valuation_confidence
+        )
+    else:
+        confidence_adjusted_score = base_score
+
     if discount_percentage >= 30:
         deal_rating = "excellent"
     elif discount_percentage >= 20:
@@ -438,12 +499,16 @@ def analyze_property(
         deal_rating = "low"
 
     return {
-        "estimated_value": property.estimated_value,
-        "opening_bid": property.opening_bid,
+        "estimated_value": estimated_value,
+        "opening_bid": opening_bid,
         "discount_amount": discount_amount,
         "discount_percentage": discount_percentage,
+        "price_per_sqft": price_per_sqft,
+        "potential_upside": discount_amount,
+        "risk_level": risk_level,
         "deal_rating": deal_rating,
-        "deal_score": score,
+        "deal_score": confidence_adjusted_score,
+        "valuation_confidence": valuation_confidence,
     }
 
 #It takes those facts and asks the LLM to interpret them.
@@ -471,3 +536,38 @@ def analyze_property_with_ai(
         analysis_data=deterministic_analysis,
         provider=provider,
     )
+
+def get_property_summary(db: Session):
+    total_properties = (
+        db.query(func.count(Property.id)).scalar() or 0
+    )
+
+    upcoming_auctions = (
+        db.query(func.count(Property.id))
+        .filter(
+            Property.auction_date >= date.today(),
+            Property.foreclosure_status.in_(
+                ["scheduled", "upcoming", "active"]
+            ),
+        )
+        .scalar()
+        or 0
+    )
+
+    properties_with_estimates = (
+        db.query(func.count(Property.id))
+        .filter(
+            Property.estimated_value.is_not(None),
+            Property.opening_bid.is_not(None),
+            Property.estimated_value > 0,
+            Property.opening_bid < Property.estimated_value,
+        )
+        .scalar()
+        or 0
+    )
+
+    return {
+        "total_properties": total_properties,
+        "upcoming_auctions": upcoming_auctions,
+        "properties_with_estimates": properties_with_estimates,
+    }

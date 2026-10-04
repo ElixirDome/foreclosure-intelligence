@@ -17,6 +17,7 @@ interface Property {
   survey_number: string | null;
   discount_percentage: number | null;
   deal_score: number | null;
+
 }
 
 interface PropertyResponse {
@@ -45,20 +46,40 @@ function Dashboard() {
   const [minArea, setMinArea] = useState("");
   const [maxArea, setMaxArea] = useState("");
 
+  const [bedrooms, setBedrooms] = useState("");
+  const [minDiscount, setMinDiscount] = useState("");
+  const [maxDiscount, setMaxDiscount] = useState("");
+  const [sortBy, setSortBy] = useState("id");
+  const [order, setOrder] = useState("desc");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [pages, setPages] = useState(0);
+  const [summary, setSummary] = useState({
+    total_properties: 0,
+    upcoming_auctions: 0,
+    properties_with_estimates: 0,
+  });
+
   async function loadProperties() {
     try {
       setLoading(true);
       setError("");
 
       const params: Record<string, string | number> = {
-        page: 1,
+        page,
         limit: 20,
+        sort_by: sortBy,
+        order,
       };
 
+      if (search.trim()) params.search = search.trim();
       if (minPrice) params.min_price = Number(minPrice);
       if (maxPrice) params.max_price = Number(maxPrice);
       if (minArea) params.min_area = Number(minArea);
       if (maxArea) params.max_area = Number(maxArea);
+      if (bedrooms) params.bedrooms = Number(bedrooms);
+      if (minDiscount) params.min_discount = Number(minDiscount);
+      if (maxDiscount) params.max_discount = Number(maxDiscount);
       if (status) params.foreclosure_status = status;
 
       const response = await api.get<PropertyResponse>(
@@ -66,21 +87,11 @@ function Dashboard() {
         { params }
       );
 
-      let results = response.data.items;
+      setProperties(response.data.items);
+      setTotal(response.data.total);
+      setPages(response.data.pages);
 
-      /*
-        Your backend currently doesn't have an address search parameter,
-        so we perform the text search on the returned properties.
-      */
-      if (search.trim()) {
-        const query = search.toLowerCase();
 
-        results = results.filter((property) =>
-          property.address.toLowerCase().includes(query)
-        );
-      }
-
-      setProperties(results);
     } catch (err) {
       console.error(err);
       setError("Could not load properties.");
@@ -91,6 +102,12 @@ function Dashboard() {
 
   useEffect(() => {
     loadProperties();
+  }, [page]);
+
+  useEffect(() => {
+    api.get("/properties/summary")
+      .then((response) => setSummary(response.data))
+      .catch((err) => console.error("Could not load summary:", err));
   }, []);
 
   function handleSearch(event: React.FormEvent) {
@@ -116,12 +133,31 @@ function Dashboard() {
         <Link to="/admin/import">Import PDF</Link>
         <button onClick={handleLogout}>Logout</button>
       </nav>
-      <header className="header">
 
+      <header className="header">
         <h1>Foreclosure Intelligence</h1>
         <p>Find and analyze auction properties.</p>
       </header>
 
+      {/* Dashboard summary cards */}
+      <div className="summary-grid">
+        <div className="summary-card">
+          <span>Total properties</span>
+          <h2>{summary.total_properties}</h2>
+        </div>
+
+        <div className="summary-card">
+          <span>Upcoming auctions</span>
+          <h2>{summary.upcoming_auctions}</h2>
+        </div>
+
+        <div className="summary-card">
+          <span>Properties with potential discounts</span>
+          <h2>{summary.properties_with_estimates}</h2>
+        </div>
+      </div>
+
+      <form className="filters" onSubmit={handleSearch}></form>
       <form className="filters" onSubmit={handleSearch}>
         <input
           type="text"
@@ -144,32 +180,42 @@ function Dashboard() {
 
         <input
           type="number"
-          placeholder="Min price"
-          value={minPrice}
-          onChange={(e) => setMinPrice(e.target.value)}
+          min="0"
+          placeholder="Bedrooms"
+          value={bedrooms}
+          onChange={(e) => setBedrooms(e.target.value)}
         />
 
         <input
           type="number"
-          placeholder="Max price"
-          value={maxPrice}
-          onChange={(e) => setMaxPrice(e.target.value)}
+          min="0"
+          max="100"
+          placeholder="Min discount %"
+          value={minDiscount}
+          onChange={(e) => setMinDiscount(e.target.value)}
         />
 
         <input
           type="number"
-          placeholder="Min area"
-          value={minArea}
-          onChange={(e) => setMinArea(e.target.value)}
+          min="0"
+          max="100"
+          placeholder="Max discount %"
+          value={maxDiscount}
+          onChange={(e) => setMaxDiscount(e.target.value)}
         />
 
-        <input
-          type="number"
-          placeholder="Max area"
-          value={maxArea}
-          onChange={(e) => setMaxArea(e.target.value)}
-        />
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+          <option value="id">Date added / ID</option>
+          <option value="price">Price</option>
+          <option value="bedrooms">Bedrooms</option>
+          <option value="bathrooms">Bathrooms</option>
+          <option value="area_sqft">Area</option>
+        </select>
 
+        <select value={order} onChange={(e) => setOrder(e.target.value)}>
+          <option value="desc">Descending</option>
+          <option value="asc">Ascending</option>
+        </select>
         <button type="submit">Search</button>
 
         <button
@@ -187,7 +233,8 @@ function Dashboard() {
       {!loading && !error && (
         <>
           <div className="results-header">
-            <h2>{properties.length} properties</h2>
+            <h2>{total} properties found</h2>
+            <p>Page {page} of {Math.max(pages, 1)}</p>
           </div>
 
           <div className="property-grid">
@@ -198,40 +245,64 @@ function Dashboard() {
                 key={property.id}
               >
                 <div className="card-top">
-                  <span className="status">
+                  <span className={`status status-${property.foreclosure_status ?? "unknown"}`}>
                     {property.foreclosure_status ?? "Unknown"}
                   </span>
 
                   {property.deal_score !== null && (
                     <span className="score">
-                      Score {property.deal_score}
+                      Deal score {property.deal_score.toFixed(0)}
                     </span>
                   )}
                 </div>
 
-                <h2>{property.address}</h2>
+                <h2 className="property-address">
+                  {property.address}
+                </h2>
 
-                <div className="price">
-                  ₹
-                  {property.price?.toLocaleString("en-IN") ??
-                    "N/A"}
+                <div className="property-price">
+                  ₹{property.price?.toLocaleString("en-IN") ?? "N/A"}
                 </div>
 
-                <div className="details">
+                <div className="property-meta">
                   <span>
                     {property.area_sqft
-                      ? `${property.area_sqft} sq ft`
+                      ? `${property.area_sqft.toLocaleString()} sq ft`
                       : "Area N/A"}
                   </span>
 
                   <span>
                     {property.property_type ?? "Type N/A"}
                   </span>
+
+                  {property.bedrooms !== null && (
+                    <span>{property.bedrooms} bed</span>
+                  )}
+                </div>
+
+                <div className="deal-details">
+                  {property.estimated_value !== null && (
+                    <div>
+                      <span>Estimated value</span>
+                      <strong>
+                        ₹{property.estimated_value.toLocaleString("en-IN")}
+                      </strong>
+                    </div>
+                  )}
+
+                  {property.discount_percentage !== null && (
+                    <div>
+                      <span>Discount</span>
+                      <strong>
+                        {property.discount_percentage.toFixed(1)}%
+                      </strong>
+                    </div>
+                  )}
                 </div>
 
                 {property.survey_number && (
                   <div className="survey">
-                    Survey No: {property.survey_number}
+                    Survey No. {property.survey_number}
                   </div>
                 )}
 
@@ -240,8 +311,32 @@ function Dashboard() {
                     Auction: {property.auction_date}
                   </div>
                 )}
+
+                <div className="card-footer">
+                  View property →
+                </div>
               </Link>
             ))}
+          </div>
+
+          <div className="pagination">
+            <button
+              type="button"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((current) => current - 1)}
+            >
+              Previous
+            </button>
+
+            <span>Page {page} of {Math.max(pages, 1)}</span>
+
+            <button
+              type="button"
+              disabled={page >= pages || loading}
+              onClick={() => setPage((current) => current + 1)}
+            >
+              Next
+            </button>
           </div>
         </>
       )}

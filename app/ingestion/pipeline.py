@@ -1,5 +1,5 @@
 from datetime import datetime
-
+import traceback
 from sqlalchemy.orm import Session
 
 from app.ingestion.base import SourceAdapter
@@ -29,12 +29,25 @@ def run_ingestion(
 
         for item in raw_items:
             extracted = adapter.extract(item)
+
+            if extracted is None:
+                continue
+
             documents = adapter.get_documents(item)
 
-            extracted_items.append({
-                "property": extracted,
-                "documents": documents,
-            })
+            if isinstance(extracted, list):
+                for property_data in extracted:
+                    extracted_items.append({
+                        "property": property_data,
+                        "documents": documents,
+                    })
+            else:
+                # Keep compatibility with adapters that return
+                # a single property dictionary.
+                extracted_items.append({
+                    "property": extracted,
+                    "documents": documents,
+                })
 
         save_result = save_ingested_properties(
             db=db,
@@ -58,6 +71,9 @@ def run_ingestion(
         }
 
     except Exception as exc:
+
+        traceback.print_exc()
+
         ingestion_run.finished_at = datetime.utcnow()
         ingestion_run.status = "failed"
         ingestion_run.error_message = str(exc)

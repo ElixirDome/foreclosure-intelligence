@@ -1,15 +1,29 @@
+
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
-from app.routes.properties import router as properties_router
-from app.routes.auth import router as auth_router
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine
-from app.models import Base #benchodi neeeeeeeeeeeeEEEEEEe
+from app.models import Base
+from app.routes.auth import router as auth_router
+from app.routes.properties import router as properties_router
+from app.ingestion.scheduler import start_scheduler, stop_scheduler
 
-from fastapi.middleware.cors import CORSMiddleware
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_scheduler()
+
+    yield
+
+    stop_scheduler()
+
 
 Base.metadata.create_all(engine)
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -21,17 +35,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-print("PROPERTIES ROUTER:", properties_router)
-print("ROUTES:", [getattr(r, "path", None) for r in app.routes])
 app.include_router(properties_router)
 app.include_router(auth_router)
+
 
 @app.get("/")
 def root():
     return {"message": "Foreclosure Intelligence API"}
 
-
-
-#FastAPI automatically parses these parameters into your endpoint function arguments
- # /properties/{property_id}parameterized route to get a specific property by its ID
-#Multiple query parameters to filter properties by price range GET /properties?min_price=200000&max_price=400000 ?starts the queery string and & seperates parameters.

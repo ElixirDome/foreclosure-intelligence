@@ -1,4 +1,6 @@
-from pathlib import Path
+import re
+import requests
+from bs4 import BeautifulSoup
 from pathlib import Path
 
 from app.ingestion.base import SourceAdapter
@@ -12,9 +14,36 @@ class PDFSourceAdapter(SourceAdapter):
         self.pdf_path = pdf_path
 
     def fetch(self):
-        text = extract_text_from_pdf(self.pdf_path)
+        url = "https://www.pnb.bank.in/EAuction.aspx"
 
-        return extract_properties_from_text(text)
+        response = requests.get(
+            url,
+            timeout=20,
+        )
+
+        response.raise_for_status()
+
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser",
+        )
+
+        links = soup.find_all("a")
+
+        auction_links = []
+
+        for link in links:
+            text = link.get_text(" ", strip=True)
+
+            if "Auction" in text or "auction" in text:
+                auction_links.append(text)
+
+        print("AUCTION ENTRIES FOUND:", len(auction_links))
+
+        for entry in auction_links[:10]:
+            print("-", entry)
+
+        return []
 
     def extract(self, item):
         return {

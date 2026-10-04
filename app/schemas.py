@@ -8,6 +8,8 @@ from typing import Literal
 #This class defines the shape of incoming/outgoing JSON, separate from your database table
 class PropertyCreate(BaseModel):#inheriting from BaseModel means that Pydantic will automatically generate validation logic for this class based on the type hints you provide.
     address: str
+    city: str | None = None
+    locality: str | None = None
     price: float | None = None# field: type | None,without = None means the field is required but nullable — the client must include it in the request body, but can send null as its value. That's a common trip-up: people expect | None alone to make it optional to omit, but it doesn't.
 #To make a field genuinely optional (can be omitted entirely), you need a default:
     bedrooms: int | None = None
@@ -31,6 +33,8 @@ class PropertyResponse(BaseModel):
 
     id: int
     address: str
+    city: str | None
+    locality: str | None
     price: float | None
     bedrooms: int | None
     bathrooms: float | None
@@ -92,8 +96,12 @@ class PropertyAnalysis(BaseModel):
     opening_bid: float | None
     discount_amount: float | None
     discount_percentage: float | None
+    price_per_sqft: float | None
+    potential_upside: float | None
+    risk_level: int | None
     deal_rating: str | None
     deal_score: float | None
+    valuation_confidence: float | None
 
 class PropertyAIAnalysis(BaseModel):
     summary: str
@@ -130,3 +138,48 @@ class ExtractedProperty(BaseModel):
     auction_close: datetime | None = None
 
     seller_name: str | None = None
+
+class PropertyValuationCreate(BaseModel):
+    estimated_value: float
+    valuation_method: str
+    source: str | None = None
+    confidence: float | None = None
+    valuation_date: date | None = None
+
+
+class PropertyValuationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    property_id: int
+    estimated_value: float
+    valuation_method: str
+    source: str | None
+    confidence: float | None
+    valuation_date: date
+
+class MarketComparableCreate(BaseModel):
+    address: str
+    city: str | None = None
+    locality: str | None = None
+    property_type: str | None = None
+    area_sqft: int
+    sale_price: float
+    sale_date: date | None = None
+    source: str
+    source_url: str | None = None
+
+
+class MarketComparableResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    address: str
+    city: str | None
+    locality: str | None
+    property_type: str | None
+    area_sqft: int
+    sale_price: float
+    sale_date: date | None
+    source: str
+    source_url: str | None

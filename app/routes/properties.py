@@ -19,8 +19,8 @@ from app.services.properties import (
    
 )
 from app.database import SessionLocal,get_db
-from app.models import Property, User
-from app.schemas import PropertyResponse,PropertyListResponse,PropertyCreate,PropertyUpdate,PropertyAnalysis,PropertyAIAnalysis #didn't import it lost 10 mins
+from app.models import Property, User, PropertyValuation
+from app.schemas import PropertyResponse,PropertyListResponse,PropertyCreate,PropertyUpdate,PropertyAnalysis,PropertyAIAnalysis, PropertyValuationCreate, PropertyValuationResponse #didn't import it lost 10 mins
 from app.security import (get_current_user, require_role,
                           require_property_owner #
                           )
@@ -28,6 +28,19 @@ from app.dependencies import get_llm_provider
 from app.services.llm import LLMProvider
 from app.services.properties import analyze_property_with_ai
 
+from app.services.valuation import (
+    record_valuation,
+    add_market_comparable,
+    calculate_market_valuation,
+)
+
+from app.schemas import (
+    PropertyValuationCreate,
+    PropertyValuationResponse,
+    MarketComparableCreate,
+    MarketComparableResponse,
+)
+from app.services.properties import get_property_summary;
 
 router = APIRouter(prefix="/properties",tags=["properties"])
 
@@ -38,6 +51,7 @@ router = APIRouter(prefix="/properties",tags=["properties"])
 def get_properties_route(
     page: int = Query(1, ge=1),#FastAPI lets us constrain query parameters.
     limit: int = Query(20, ge=1, le=100),# now a client couldn't do GET /properties?limit=100000000
+    search: str | None = Query(None),
     min_price: int | None = Query(None, ge=0),
     max_price: int | None = Query(None, ge=0),
     bedrooms: int | None = Query(None, ge=0),
@@ -70,6 +84,7 @@ def get_properties_route(
           
             page=page,
             limit=limit,
+            search=search,
             min_price=min_price,
             max_price=max_price,
             bedrooms=bedrooms,
@@ -90,6 +105,12 @@ def get_properties_route(
                 status_code=400,
                 detail=str(e)
             )
+
+@router.get("/summary")
+def property_summary_route(
+    db: Session = Depends(get_db),
+):
+    return get_property_summary(db)
 
 @router.get(
     "/{property_id}/analysis",
@@ -189,6 +210,7 @@ def update_property_route(
         property=property,
         update_data=update_data
     )
+
 @router.post("/import")
 def import_properties_from_pdf(
     file: UploadFile = File(...),
@@ -239,3 +261,126 @@ def import_properties_from_pdf(
 
     finally:
         temp_path.unlink(missing_ok=True)
+
+@router.post(
+    "/{property_id}/valuations",
+    response_model=PropertyValuationResponse,
+)
+def create_property_valuation(
+    property_id: int,
+    valuation: PropertyValuationCreate,
+    db: Session = Depends(get_db),
+):
+    try:
+        return record_valuation(
+            db=db,
+            property_id=property_id,
+            estimated_value=valuation.estimated_value,
+            valuation_method=valuation.valuation_method,
+            source=valuation.source,
+            confidence=valuation.confidence,
+            valuation_date=valuation.valuation_date,
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        )        
+
+# frontend will also need to read valuations.
+# Add this route to app/routes/properties.py:
+@router.get(
+    "/{property_id}/valuations",
+    response_model=list[PropertyValuationResponse],
+)
+def get_property_valuations(
+    property_id: int,
+    db: Session = Depends(get_db),
+):
+    property_obj = get_property_by_id(
+        property_id=property_id,
+        db=db,
+    )
+
+    return (
+        db.query(PropertyValuation)
+        .filter(PropertyValuation.property_id == property_obj.id)
+        .order_by(PropertyValuation.valuation_date.desc())
+        .all()
+    )    
+
+@router.get(
+    "/market-comparables",
+    response_model=list[MarketComparableResponse],
+)
+def get_market_comparables(
+    db: Session = Depends(get_db),
+):
+    from app.models import MarketComparable
+
+    return (
+        db.query(MarketComparable)
+        .order_by(MarketComparable.sale_date.desc())
+        .all()
+    )
+
+@router.post(
+    "/market-comparables",
+    response_model=MarketComparableResponse,
+)
+def create_market_comparable(
+    comparable: MarketComparableCreate,
+    db: Session = Depends(get_db),
+):
+    return add_market_comparable(
+        db=db,
+        address=comparable.address,
+        city=comparable.city,
+        locality=comparable.locality,
+        property_type=comparable.property_type,
+        area_sqft=comparable.area_sqft,
+        sale_price=comparable.sale_price,
+        sale_date=comparable.sale_date,
+        source=comparable.source,
+        source_url=comparable.source_url,
+    )
+
+
+@router.post(
+    "/{property_id}/market-valuation",
+)
+def calculate_property_market_valuation(
+    property_id: int,
+    db: Session = Depends(get_db),
+):
+    property_obj = get_property_by_id(
+        property_id=property_id,
+        db=db,
+    )
+
+    try:
+        valuation_result = calculate_market_valuation(
+            db=db,
+            property_obj=property_obj,
+        )
+
+        valuation = record_valuation(
+            db=db,
+            property_id=property_obj.id,
+            estimated_value=valuation_result["estimated_value"],
+            valuation_method=valuation_result["valuation_method"],
+            source="market_comparables",
+            confidence=valuation_result["confidence"],
+        )
+
+        return {
+            **valuation_result,
+            "valuation_id": valuation.id,
+        }
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        )
