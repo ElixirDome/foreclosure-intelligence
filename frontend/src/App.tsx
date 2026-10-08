@@ -6,10 +6,12 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import Import from "./pages/Import";
 import Research from "./pages/Research";
 import ErrorBoundary from "./components/ErrorBoundary";
+import ChatBot from "./components/ChatBot";
 
 function App() {
   return (
     <BrowserRouter>
+      <ChatBot />
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
 

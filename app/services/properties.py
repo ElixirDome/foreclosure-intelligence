@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from math import ceil
 from datetime import date
-from app.models import Property
+from app.models import Property, PropertyDocument, Document
 
 from sqlalchemy import and_, case, func
 
@@ -135,6 +135,7 @@ def get_properties(
     foreclosure_status: str | None,
     auction_date_from: date | None,
     auction_date_to: date | None,
+    property_type: str | None = None,
 ):
     """
     Query properties with calculated deal metrics.
@@ -273,6 +274,17 @@ def get_properties(
             Property.auction_date <= auction_date_to
         )
 
+    if property_type is not None:
+        pt = property_type.strip().lower()
+        if pt in {"residential", "commercial"}:
+            query = query.filter(
+                func.lower(Property.property_type).ilike(f"%{pt}%")
+            )
+        else:
+            query = query.filter(
+                func.lower(Property.property_type) == pt
+            )
+
     # Pagination count
     total = query.count()
 
@@ -325,6 +337,7 @@ def get_properties(
             "opening_bid": property.opening_bid,
             "estimated_value": property.estimated_value,
             "property_type": property.property_type,
+            "survey_number": property.survey_number,
             "discount_percentage": (
                 float(discount)
                 if discount is not None
@@ -340,6 +353,43 @@ def get_properties(
         properties.append(property_data)
 
     pages = ceil(total / limit)
+
+    if properties:
+        prop_ids = [item["id"] for item in properties]
+        rows = (
+            db.query(PropertyDocument, Document)
+            .join(Document, Document.id == PropertyDocument.document_id)
+            .filter(PropertyDocument.property_id.in_(prop_ids))
+            .all()
+        )
+        by_prop: dict[int, list] = {}
+        for link, doc in rows:
+            by_prop.setdefault(link.property_id, []).append({
+                "source_name": doc.source_name,
+                "source_url": doc.source_url,
+                "document_type": doc.document_type,
+                "title": doc.title,
+                "filename": doc.filename,
+            })
+        for item in properties:
+            item["sources"] = by_prop.get(item["id"], [])
+            ptype = item.get("property_type")
+            if ptype:
+                low = str(ptype).lower()
+                if "commercial" in low:
+                    item["property_type"] = "commercial"
+                elif any(
+                    k in low
+                    for k in (
+                        "residential",
+                        "flat",
+                        "apartment",
+                        "house",
+                        "villa",
+                        "duplex",
+                    )
+                ):
+                    item["property_type"] = "residential"
 
     return {
         "items": properties,
@@ -534,6 +584,7 @@ def analyze_property_with_ai(
     property_data = {
         "address": property.address,
         "property_type": property.property_type,
+            "survey_number": property.survey_number,
         "price": property.price,
         "bedrooms": property.bedrooms,
         "bathrooms": property.bathrooms,

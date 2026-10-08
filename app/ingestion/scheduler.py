@@ -2,7 +2,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.database import SessionLocal
 from app.ingestion.pnb_source import PNBSourceAdapter
-from app.ingestion.pipeline import run_ingestion
+from app.ingestion.banknet_source import BankNetSourceAdapter
+from app.ingestion.pipeline import run_ingestion, run_document_ingestion
 
 
 scheduler = BackgroundScheduler()
@@ -38,6 +39,21 @@ def run_pnb_ingestion():
         db.close()
 
 
+def run_banknet_ingestion():
+    db = SessionLocal()
+    try:
+        adapter = BankNetSourceAdapter()
+        # Document-first: retain notices even when lot parse is incomplete
+        result = run_document_ingestion(db=db, adapter=adapter)
+        print("\nAUTOMATIC BANKNET DOCUMENT INGESTION COMPLETE")
+        print(result)
+    except Exception as exc:
+        print("\nAUTOMATIC BANKNET INGESTION FAILED")
+        print("ERROR:", exc)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     scheduler.add_job(
         run_pnb_ingestion,
@@ -48,10 +64,19 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
+    scheduler.add_job(
+        run_banknet_ingestion,
+        "interval",
+        hours=6,
+        id="banknet_ingestion",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
 
     scheduler.start()
 
-    print("PNB scheduler started: runs every 6 hours")
+    print("Schedulers started: PNB + BankNet every 6 hours")
 
 
 def stop_scheduler():

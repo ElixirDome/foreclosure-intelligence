@@ -88,3 +88,38 @@ def is_residential_property(text: str) -> bool:
 
     # If we cannot establish that it is residential, reject it.
     return False
+
+def classify_use_type(text: str) -> str | None:
+    """
+    Return 'residential', 'commercial', or None.
+    Used to label properties for UI separation.
+    """
+    if not text:
+        return None
+    text_lower = text.lower()
+    has_residential = _contains_any(text_lower, STRONG_RESIDENTIAL_PATTERNS)
+    has_commercial = _contains_any(
+        text_lower,
+        [
+            r"\bcommercial property\b",
+            r"\bcommercial building\b",
+            r"\bcommercial premises\b",
+            r"\bcommercial plot\b",
+            r"\boffice space\b",
+            r"\bshop\b",
+            r"\bshowroom\b",
+            r"\bgodown\b",
+            r"\bwarehouse\b",
+            r"\bfactory\b",
+            r"\bindustrial\b",
+        ],
+    )
+    if has_residential and not has_commercial:
+        return "residential"
+    if has_commercial and not has_residential:
+        return "commercial"
+    if has_residential:
+        return "residential"
+    if has_commercial:
+        return "commercial"
+    return None

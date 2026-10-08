@@ -2,6 +2,14 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../api/client";
 
+interface PropertySource {
+  source_name: string;
+  source_url?: string | null;
+  document_type?: string | null;
+  title?: string | null;
+  filename?: string | null;
+}
+
 interface Property {
   id: number;
   address: string;
@@ -17,7 +25,7 @@ interface Property {
   survey_number: string | null;
   discount_percentage: number | null;
   deal_score: number | null;
-
+  sources?: PropertySource[];
 }
 
 interface PropertyResponse {
@@ -41,6 +49,7 @@ function Dashboard() {
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [propertyType, setPropertyType] = useState("");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [minArea, setMinArea] = useState("");
@@ -81,6 +90,7 @@ function Dashboard() {
       if (minDiscount) params.min_discount = Number(minDiscount);
       if (maxDiscount) params.max_discount = Number(maxDiscount);
       if (status) params.foreclosure_status = status;
+      if (propertyType) params.property_type = propertyType;
 
       const response = await api.get<PropertyResponse>(
         "/properties/",
@@ -118,6 +128,7 @@ function Dashboard() {
   function clearFilters() {
     setSearch("");
     setStatus("");
+    setPropertyType("");
     setMinPrice("");
     setMaxPrice("");
     setMinArea("");
@@ -217,6 +228,16 @@ function Dashboard() {
           <option value="desc">Descending</option>
           <option value="asc">Ascending</option>
         </select>
+        <select
+          value={propertyType}
+          onChange={(e) => setPropertyType(e.target.value)}
+          aria-label="Property type"
+        >
+          <option value="">All types</option>
+          <option value="residential">Residential</option>
+          <option value="commercial">Commercial</option>
+        </select>
+
         <button type="submit">Search</button>
 
         <button
@@ -272,14 +293,43 @@ function Dashboard() {
                       : "Area N/A"}
                   </span>
 
-                  <span>
-                    {property.property_type ?? "Type N/A"}
+                  <span
+                    className={
+                      property.property_type === "commercial"
+                        ? "type-badge commercial"
+                        : property.property_type === "residential"
+                          ? "type-badge residential"
+                          : "type-badge"
+                    }
+                  >
+                    {property.property_type
+                      ? property.property_type.charAt(0).toUpperCase() +
+                        property.property_type.slice(1)
+                      : "Type N/A"}
                   </span>
 
                   {property.bedrooms !== null && (
                     <span>{property.bedrooms} bed</span>
                   )}
                 </div>
+
+                {property.sources && property.sources.length > 0 && (
+                  <div className="source-row">
+                    {property.sources.slice(0, 2).map((src, idx) => (
+                      <a
+                        key={idx}
+                        className="source-chip"
+                        href={src.source_url || undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {src.source_name}
+                        {src.source_url ? " ↗" : ""}
+                      </a>
+                    ))}
+                  </div>
+                )}
 
                 <div className="deal-details">
                   {property.estimated_value !== null && (

@@ -70,6 +70,7 @@ def get_properties_route(
     foreclosure_status: str | None = Query(None),
     auction_date_from: date | None = Query(None),
     auction_date_to: date | None = Query(None),
+    property_type: str | None = Query(None, description="residential | commercial"),
 ):
     
     if foreclosure_status:
@@ -97,6 +98,7 @@ def get_properties_route(
             foreclosure_status=foreclosure_status,
             auction_date_from=auction_date_from,
             auction_date_to=auction_date_to,
+            property_type=property_type,
             
         )
 

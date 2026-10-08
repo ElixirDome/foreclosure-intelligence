@@ -28,6 +28,14 @@ class PropertyCreate(BaseModel):#inheriting from BaseModel means that Pydantic w
     property_type: str | None = None
     survey_number: str | None = None
 
+class PropertySourceInfo(BaseModel):
+    source_name: str
+    source_url: str | None = None
+    document_type: str | None = None
+    title: str | None = None
+    filename: str | None = None
+
+
 class PropertyResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -47,6 +55,7 @@ class PropertyResponse(BaseModel):
     survey_number: str | None = None
     discount_percentage: float | None = None
     deal_score: float | None = None
+    sources: list[PropertySourceInfo] = []
 
 class PropertyUpdate(BaseModel):
     address: str | None = None
