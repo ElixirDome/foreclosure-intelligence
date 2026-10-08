@@ -13,6 +13,11 @@ def create_evidence(
     evidence = Evidence(
         property_id=evidence_data.property_id,
         document_id=evidence_data.document_id,
+        document_chunk_id=getattr(
+            evidence_data,
+            "document_chunk_id",
+            None,
+        ),
         field=evidence_data.field,
         value=evidence_data.value,
         page_number=evidence_data.page_number,

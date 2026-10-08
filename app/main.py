@@ -8,6 +8,8 @@ from app.database import engine
 from app.models import Base
 from app.routes.auth import router as auth_router
 from app.routes.properties import router as properties_router
+from app.routes.documents import router as documents_router
+from app.routes.intelligence import router as intelligence_router
 from app.ingestion.scheduler import start_scheduler, stop_scheduler
 
 
@@ -45,9 +47,23 @@ app.add_middleware(
 
 app.include_router(properties_router)
 app.include_router(auth_router)
+app.include_router(documents_router)
+app.include_router(intelligence_router)
 
 
 @app.get("/")
 def root():
-    return {"message": "Foreclosure Intelligence API"}
+    return {
+        "message": "Foreclosure Intelligence API",
+        "architecture": "document-centric RAG",
+        "endpoints": {
+            "documents": "/documents",
+            "retrieve": "/documents/retrieve",
+            "rag": "/documents/rag",
+            "extract": "/documents/{id}/extract",
+            "deal": "/properties/{id}/deal",
+            "evidence": "/properties/{id}/evidence",
+        },
+    }
+
 

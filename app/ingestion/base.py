@@ -5,10 +5,22 @@ from typing import Any
 
 @dataclass
 class SourceDocument:
+    """
+    Raw document payload from a source adapter.
+
+    Adapters answer "where do I get the document?" — not how to parse
+    every field inside it. Interpretation happens after the document is
+    stored and chunked.
+    """
+
     source_name: str
     source_url: str
     document_type: str
     content: bytes | str
+    title: str | None = None
+    filename: str | None = None
+    mime_type: str | None = None
+    storage_path: str | None = None
 
 
 class SourceAdapter(ABC):

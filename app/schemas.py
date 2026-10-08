@@ -183,3 +183,169 @@ class MarketComparableResponse(BaseModel):
     sale_date: date | None
     source: str
     source_url: str | None
+
+
+# --- Document architecture (Phase 1) ---
+
+
+class DocumentChunkCreate(BaseModel):
+    chunk_index: int
+    text: str
+    page_number: int | None = None
+    metadata_json: dict | None = None
+
+
+class DocumentChunkResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    document_id: int
+    chunk_index: int
+    page_number: int | None
+    text: str
+    metadata_json: dict | None
+
+
+class DocumentCreate(BaseModel):
+    source_name: str
+    source_url: str
+    document_type: str
+    title: str | None = None
+    filename: str | None = None
+    mime_type: str | None = None
+    storage_path: str | None = None
+    extracted_text: str | None = None
+    content_hash: str | None = None
+
+
+class DocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    source_name: str
+    source_url: str
+    document_type: str
+    title: str | None
+    filename: str | None
+    mime_type: str | None
+    storage_path: str | None
+    content_hash: str | None
+    first_seen_at: datetime
+    last_seen_at: datetime
+
+
+class EvidenceCreate(BaseModel):
+    property_id: int
+    document_id: int
+    field: str
+    value: str
+    page_number: int | None = None
+    source_text: str | None = None
+    extraction_method: str | None = None
+    confidence: float | None = None
+    document_chunk_id: int | None = None
+
+
+class EvidenceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    property_id: int
+    document_id: int
+    document_chunk_id: int | None
+    field: str
+    value: str
+    page_number: int | None
+    source_text: str | None
+    extraction_method: str | None
+    confidence: float | None
+
+
+# --- Retrieval / RAG / Deal intelligence ---
+
+
+class RetrieveRequest(BaseModel):
+    query: str
+    mode: Literal["keyword", "vector", "hybrid"] = "hybrid"
+    document_id: int | None = None
+    limit: int = 8
+
+
+class RetrievedChunkResponse(BaseModel):
+    chunk_id: int
+    document_id: int
+    chunk_index: int
+    page_number: int | None
+    text: str
+    score: float
+    method: str
+    document_title: str | None = None
+    source_name: str | None = None
+    filename: str | None = None
+
+
+class RAGRequest(BaseModel):
+    question: str
+    mode: Literal["keyword", "vector", "hybrid"] = "hybrid"
+    document_id: int | None = None
+    limit: int = 6
+
+
+class CitationResponse(BaseModel):
+    document_id: int
+    chunk_id: int
+    page_number: int | None
+    filename: str | None
+    source_name: str | None
+    excerpt: str
+    score: float
+
+
+class RAGResponse(BaseModel):
+    question: str
+    answer: str
+    citations: list[CitationResponse]
+    chunks_used: int
+    method: str
+    mode: str
+
+
+class DealFactorResponse(BaseModel):
+    direction: str
+    label: str
+    detail: str | None = None
+
+
+class DealIntelligenceResponse(BaseModel):
+    property_id: int
+    deal_score: float | None
+    deal_rating: str | None
+    discount_amount: float | None
+    discount_percentage: float | None
+    price_per_sqft: float | None
+    risk_level: int
+    estimated_value: float | None
+    opening_bid: float | None
+    comparable_count: int
+    factors: list[DealFactorResponse]
+    explanation: str
+
+
+class StructuredFieldEvidence(BaseModel):
+    field: str
+    value: str
+    page_number: int | None = None
+    source_text: str | None = None
+    document_id: int | None = None
+    document_chunk_id: int | None = None
+    extraction_method: str = "regex"
+    confidence: float | None = None
+
+
+class StructuredExtractionResponse(BaseModel):
+    property: ExtractedProperty
+    evidence: list[StructuredFieldEvidence]
+    validation_errors: list[str]
+    valid: bool
+    method: str
+

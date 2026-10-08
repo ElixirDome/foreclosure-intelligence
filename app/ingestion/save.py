@@ -1,10 +1,7 @@
-import hashlib
-from datetime import datetime, timezone
-
 from sqlalchemy.orm import Session
 
+from app.ingestion.document_ingest import ingest_document
 from app.models import (
-    Document,
     Evidence,
     IngestionRun,
     Property,
@@ -24,7 +21,28 @@ def _evidence_value(evidence):
         "source_text": evidence.source_text,
         "extraction_method": evidence.extraction_method,
         "confidence": evidence.confidence,
+        "document_chunk_id": getattr(
+            evidence,
+            "document_chunk_id",
+            None,
+        ),
     }
+
+
+def _normalize_document_payload(document_data):
+    """Accept SourceDocument, dict, or dict-like from adapters."""
+    if hasattr(document_data, "__dataclass_fields__"):
+        return {
+            "source_name": document_data.source_name,
+            "source_url": document_data.source_url,
+            "document_type": document_data.document_type,
+            "content": document_data.content,
+            "title": document_data.title,
+            "filename": document_data.filename,
+            "mime_type": document_data.mime_type,
+            "storage_path": document_data.storage_path,
+        }
+    return document_data
 
 
 def save_ingested_properties(
@@ -33,12 +51,20 @@ def save_ingested_properties(
     user_id: int,
     ingestion_run_id: int,
 ):
+    """
+    Persist properties, linking each to universally ingested documents.
+
+    Document path (Phase 2):
+        SourceDocument → Document + extracted_text + DocumentChunk[]
+    Property path (unchanged for now):
+        structured fields → Property + Evidence
+    """
     saved = []
     skipped = []
 
     for item in properties:
         property_data = item["property"]
-        documents = item["documents"]
+        documents = item.get("documents") or []
         evidence_items = item.get("evidence", [])
 
         property_key = create_property_key(
@@ -86,46 +112,15 @@ def save_ingested_properties(
             saved.append(property_obj)
 
         for document_data in documents:
-            content = document_data.get("content")
+            payload = _normalize_document_payload(document_data)
+            pages = item.get("pages")
 
-            if isinstance(content, str):
-                content = content.encode("utf-8")
-
-            content_hash = (
-                hashlib.sha256(content).hexdigest()
-                if content is not None
-                else None
+            ingest_result = ingest_document(
+                db,
+                payload,
+                pages=pages,
             )
-
-            now = datetime.now(timezone.utc)
-
-            document = None
-
-            if content_hash:
-                document = (
-                    db.query(Document)
-                    .filter(
-                        Document.content_hash == content_hash
-                    )
-                    .first()
-                )
-
-            if document is None:
-                document = Document(
-                    source_name=document_data["source_name"],
-                    source_url=document_data["source_url"],
-                    document_type=document_data["document_type"],
-                    title=document_data.get("title"),
-                    content_hash=content_hash,
-                    first_seen_at=now,
-                    last_seen_at=now,
-                )
-
-                db.add(document)
-                db.flush()
-
-            else:
-                document.last_seen_at = now
+            document = ingest_result["document"]
 
             existing_relationship = (
                 db.query(PropertyDocument)
@@ -140,16 +135,14 @@ def save_ingested_properties(
                 property_document = PropertyDocument(
                     property_id=property_obj.id,
                     document_id=document.id,
-                    relationship_type=document_data[
-                        "document_type"
-                    ],
+                    relationship_type=payload.get(
+                        "document_type",
+                        document.document_type,
+                    ),
                 )
-
                 db.add(property_document)
 
             # Evidence belongs to the property + document.
-            # We avoid inserting the same field/value/page
-            # repeatedly when the same PDF is ingested again.
             for raw_evidence in evidence_items:
                 evidence_data = _evidence_value(raw_evidence)
 
@@ -159,9 +152,9 @@ def save_ingested_properties(
                         Evidence.property_id == property_obj.id,
                         Evidence.document_id == document.id,
                         Evidence.field == evidence_data["field"],
-                        Evidence.value == evidence_data["value"],
+                        Evidence.value == str(evidence_data["value"]),
                         Evidence.page_number
-                        == evidence_data["page_number"],
+                        == evidence_data.get("page_number"),
                     )
                     .first()
                 )
@@ -173,14 +166,17 @@ def save_ingested_properties(
                     Evidence(
                         property_id=property_obj.id,
                         document_id=document.id,
+                        document_chunk_id=evidence_data.get(
+                            "document_chunk_id"
+                        ),
                         field=evidence_data["field"],
-                        value=evidence_data["value"],
-                        page_number=evidence_data["page_number"],
-                        source_text=evidence_data["source_text"],
-                        extraction_method=evidence_data[
+                        value=str(evidence_data["value"]),
+                        page_number=evidence_data.get("page_number"),
+                        source_text=evidence_data.get("source_text"),
+                        extraction_method=evidence_data.get(
                             "extraction_method"
-                        ],
-                        confidence=evidence_data["confidence"],
+                        ),
+                        confidence=evidence_data.get("confidence"),
                     )
                 )
 
@@ -203,3 +199,4 @@ def save_ingested_properties(
         "saved": saved,
         "skipped": skipped,
     }
+

@@ -1,5 +1,5 @@
-from sqlalchemy import Integer, Numeric, String, ForeignKey, Date, DateTime
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column,relationship
+from sqlalchemy import Integer, Numeric, String, Text, ForeignKey, Date, DateTime, JSON
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from app.database import Base
 from datetime import date, datetime  
 
@@ -132,13 +132,31 @@ class IngestionRun(Base):
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
 
 class Document(Base):
+    """
+    Source-of-truth record for any ingested artifact (PDF, web page, API payload).
+
+    Properties are derived from documents. We retain the document so every
+    extracted fact can be traced back to its origin.
+    """
+
     __tablename__ = "documents"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
     source_name: Mapped[str] = mapped_column(String, nullable=False)
     source_url: Mapped[str] = mapped_column(String, nullable=False)
     document_type: Mapped[str] = mapped_column(String, nullable=False)
+
     title: Mapped[str | None] = mapped_column(String, nullable=True)
+    filename: Mapped[str | None] = mapped_column(String, nullable=True)
+    mime_type: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Optional on-disk reference when we store the original file.
+    storage_path: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Full normalized text after extraction/OCR. Used for chunking and
+    # keyword retrieval before vector search exists.
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     content_hash: Mapped[str | None] = mapped_column(
         String,
@@ -149,6 +167,49 @@ class Document(Base):
 
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        order_by="DocumentChunk.chunk_index",
+    )
+
+
+class DocumentChunk(Base):
+    """
+    A retrievable slice of a Document.
+
+    Chunks are the unit of retrieval for keyword (and later vector) search.
+    They preserve page_number so answers can cite exact location in the source.
+    """
+
+    __tablename__ = "document_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    document_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("documents.id"),
+        nullable=False,
+        index=True,
+    )
+
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    page_number: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        index=True,
+    )
+
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Free-form metadata (lot labels, section headers, etc.) without
+    # forcing a rigid schema during Phase 1.
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    document: Mapped["Document"] = relationship(back_populates="chunks")
+
 
 class PropertyDocument(Base):
     __tablename__ = "property_documents"
@@ -278,6 +339,11 @@ class MarketComparable(Base):
     )
 
 class Evidence(Base):
+    """
+    Field-level provenance: which document (and optionally which chunk)
+    supports a particular property attribute.
+    """
+
     __tablename__ = "evidence"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -293,6 +359,15 @@ class Evidence(Base):
         Integer,
         ForeignKey("documents.id"),
         nullable=False,
+        index=True,
+    )
+
+    # Optional link to the exact chunk that supported this field.
+    # Nullable so existing evidence rows remain valid during migration.
+    document_chunk_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("document_chunks.id"),
+        nullable=True,
         index=True,
     )
 
