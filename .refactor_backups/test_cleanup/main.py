@@ -13,19 +13,11 @@ from app.ingestion.scheduler import start_scheduler, stop_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Background ingestion is a production concern.
-    # Do not start it when the application is being tested.
-    import sys
-
-    running_under_pytest = "pytest" in sys.modules
-
-    if not running_under_pytest:
-        start_scheduler()
+    start_scheduler()
 
     yield
 
-    if not running_under_pytest:
-        stop_scheduler()
+    stop_scheduler()
 
 
 Base.metadata.create_all(engine)

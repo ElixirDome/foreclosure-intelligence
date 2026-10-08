@@ -172,9 +172,8 @@ class PNBSourceAdapter(SourceAdapter):
                 temp_file.name
             )
 
-            print(
-                f"  Downloaded: {len(pdf_bytes)} bytes"
-            )
+            print(f"  Downloaded: {len(pdf_bytes)} bytes")
+            print(f"  PDF path: {pdf_path}")
 
             downloaded_items.append(
                 {

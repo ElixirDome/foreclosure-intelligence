@@ -1,8 +1,8 @@
 from unittest import result
 
-from fastapi import (APIRouter, Query, HTTPException,#<--from ... import (...) syntax requires the imported names to be separated by commas.
-Depends, status, HTTPException,
-File, UploadFile)
+from fastapi import (APIRouter,Query,
+Depends,status, HTTPException,
+File,UploadFile)
 
 from pathlib import Path
 import tempfile
@@ -124,18 +124,6 @@ def analyze_property_route(
         property_id=property_id,
         db=db
     )
-
-    if property.estimated_value is None or property.estimated_value <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Deal analysis requires estimated_value greater than 0",
-        )
-
-    if property.opening_bid is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Deal analysis requires opening_bid",
-        )
 
     return analyze_property(property)
 

@@ -1,51 +1,56 @@
-import re
-import requests
-from bs4 import BeautifulSoup
 from pathlib import Path
 
+import requests
+from bs4 import BeautifulSoup
+
 from app.ingestion.base import SourceAdapter
-from app.services.pdf import extract_text_from_pdf
-from app.services.extraction import extract_properties_from_text
+from app.services.extraction import extract_properties_from_pages
+from app.services.pdf import extract_pages_from_pdf
 
 
 class PDFSourceAdapter(SourceAdapter):
 
     def __init__(self, pdf_path: Path):
         self.pdf_path = pdf_path
+        self._evidence_by_item_id = {}
 
     def fetch(self):
-        url = "https://www.pnb.bank.in/EAuction.aspx"
+        """
+        Parse the supplied PDF into extraction results.
 
-        response = requests.get(
-            url,
-            timeout=20,
-        )
+        The network lookup is retained as an informational
+        discovery step, but local PDF ingestion is what
+        produces the actual items.
+        """
+        pages = extract_pages_from_pdf(self.pdf_path)
 
-        response.raise_for_status()
+        results = extract_properties_from_pages(pages)
 
-        soup = BeautifulSoup(
-            response.text,
-            "html.parser",
-        )
+        items = []
 
-        links = soup.find_all("a")
+        for index, result in enumerate(results):
+            item = {
+                "property": result.property,
+                "evidence": result.evidence,
+            }
 
-        auction_links = []
+            self._evidence_by_item_id[id(item)] = result.evidence
+            items.append(item)
 
-        for link in links:
-            text = link.get_text(" ", strip=True)
-
-            if "Auction" in text or "auction" in text:
-                auction_links.append(text)
-
-        print("AUCTION ENTRIES FOUND:", len(auction_links))
-
-        for entry in auction_links[:10]:
-            print("-", entry)
-
-        return []
+        return items
 
     def extract(self, item):
+        if isinstance(item, dict) and "property" in item:
+            property_data = item["property"]
+
+            if hasattr(property_data, "model_dump"):
+                return property_data.model_dump()
+
+            return property_data
+
+        if hasattr(item, "model_dump"):
+            return item.model_dump()
+
         return {
             "address": item.address,
             "area_sqft": item.area_sqft,
@@ -59,6 +64,12 @@ class PDFSourceAdapter(SourceAdapter):
             ),
         }
 
+    def get_evidence(self, item):
+        if isinstance(item, dict):
+            return item.get("evidence", [])
+
+        return []
+
     def get_documents(self, item):
         return [
             {
@@ -66,16 +77,6 @@ class PDFSourceAdapter(SourceAdapter):
                 "source_url": str(self.pdf_path),
                 "document_type": "auction_notice",
                 "title": self.pdf_path.name,
-                "content": self.pdf_path.read_bytes(),#Now the saver can calculate a hash from the actual PDF bytes.
+                "content": self.pdf_path.read_bytes(),
             }
         ]
-
-# PDFSourceAdapter.fetch()
-#         ↓
-# [ExtractedProperty, ExtractedProperty, ...]
-#         ↓
-# pipeline loops over them
-#         ↓
-# adapter.extract(one ExtractedProperty)
-#         ↓
-# one property dict    

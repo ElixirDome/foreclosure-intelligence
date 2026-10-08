@@ -1,0 +1,1194 @@
+
+===== app\ingestion\pdf_source.py =====
+
+import re
+import requests
+from bs4 import BeautifulSoup
+from pathlib import Path
+
+from app.ingestion.base import SourceAdapter
+from app.services.pdf import extract_text_from_pdf
+from app.services.extraction import extract_properties_from_text
+
+
+class PDFSourceAdapter(SourceAdapter):
+
+    def __init__(self, pdf_path: Path):
+        self.pdf_path = pdf_path
+
+    def fetch(self):
+        url = "https://www.pnb.bank.in/EAuction.aspx"
+
+        response = requests.get(
+            url,
+            timeout=20,
+        )
+
+        response.raise_for_status()
+
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser",
+        )
+
+        links = soup.find_all("a")
+
+        auction_links = []
+
+        for link in links:
+            text = link.get_text(" ", strip=True)
+
+            if "Auction" in text or "auction" in text:
+                auction_links.append(text)
+
+        print("AUCTION ENTRIES FOUND:", len(auction_links))
+
+        for entry in auction_links[:10]:
+            print("-", entry)
+
+        return []
+
+    def extract(self, item):
+        return {
+            "address": item.address,
+            "area_sqft": item.area_sqft,
+            "opening_bid": item.opening_bid,
+            "property_type": item.property_type,
+            "survey_number": item.survey_number,
+            "auction_date": (
+                item.auction_start.date()
+                if item.auction_start
+                else None
+            ),
+        }
+
+    def get_documents(self, item):
+        return [
+            {
+                "source_name": "PDFUpload",
+                "source_url": str(self.pdf_path),
+                "document_type": "auction_notice",
+                "title": self.pdf_path.name,
+                "content": self.pdf_path.read_bytes(),#Now the saver can calculate a hash from the actual PDF bytes.
+            }
+        ]
+
+# PDFSourceAdapter.fetch()
+#         ↓
+# [ExtractedProperty, ExtractedProperty, ...]
+#         ↓
+# pipeline loops over them
+#         ↓
+# adapter.extract(one ExtractedProperty)
+#         ↓
+# one property dict    
+
+===== app\ingestion\pipeline.py =====
+
+from datetime import datetime, timezone
+import traceback
+from sqlalchemy.orm import Session
+
+from app.ingestion.base import SourceAdapter
+from app.ingestion.save import save_ingested_properties
+from app.models import IngestionRun
+
+
+def run_ingestion(
+    db: Session,
+    adapter: SourceAdapter,
+    user_id: int,
+):
+    ingestion_run = IngestionRun(
+        source_name=adapter.__class__.__name__,
+        started_at=datetime.now(timezone.utc),
+        status="running",
+    )
+
+    db.add(ingestion_run)
+    db.commit()
+    db.refresh(ingestion_run)
+
+    try:
+        raw_items = adapter.fetch()
+
+        extracted_items = []
+
+        for item in raw_items:
+            extracted = adapter.extract(item)
+
+            if extracted is None:
+                continue
+
+            documents = adapter.get_documents(item)
+
+            if isinstance(extracted, list):
+                for property_data in extracted:
+                    extracted_items.append({
+                        "property": property_data,
+                        "documents": documents,
+                    })
+            else:
+                # Keep compatibility with adapters that return
+                # a single property dictionary.
+                extracted_items.append({
+                    "property": extracted,
+                    "documents": documents,
+                })
+
+        save_result = save_ingested_properties(
+            db=db,
+            properties=extracted_items,
+            user_id=user_id,
+            ingestion_run_id=ingestion_run.id,
+        )
+
+        ingestion_run.finished_at = datetime.now(timezone.utc)
+        ingestion_run.status = "success"
+        ingestion_run.items_found = len(raw_items)
+
+        db.commit()
+
+        return {
+            "ingestion_run_id": ingestion_run.id,
+            "items_found": len(raw_items),
+            "items_extracted": len(extracted_items),
+            "saved": save_result["saved"],
+            "skipped": save_result["skipped"],
+        }
+
+    except Exception as exc:
+
+        traceback.print_exc()
+
+        ingestion_run.finished_at = datetime.now(timezone.utc)
+        ingestion_run.status = "failed"
+        ingestion_run.error_message = str(exc)
+
+        db.commit()
+
+        return {
+            "ingestion_run_id": ingestion_run.id,
+            "items_found": 0,
+            "items_extracted": 0,
+            "saved": [],
+            "skipped": [],
+            "error": str(exc),
+        }
+
+===== app\ingestion\save.py =====
+
+import hashlib
+from datetime import datetime, timezone
+
+from sqlalchemy.orm import Session
+
+from app.models import (
+    Document,
+    IngestionRun,
+    Property,
+    PropertyDocument,
+)
+from app.services.normalization import create_property_key
+
+
+def save_ingested_properties(
+    db: Session,
+    properties: list[dict],
+    user_id: int,
+    ingestion_run_id: int,
+):
+    saved = []
+    skipped = []
+
+    for item in properties:
+        property_data = item["property"]
+        documents = item["documents"]
+
+        property_key = create_property_key(
+            address=property_data["address"],
+            area_sqft=property_data.get("area_sqft"),
+            property_type=property_data.get("property_type"),
+            survey_number=property_data.get("survey_number"),
+        )
+
+        # 1. Find or create the property
+        property_obj = (
+            db.query(Property)
+            .filter(Property.property_key == property_key)
+            .first()
+        )
+
+        if property_obj:
+            if not property_obj.city and property_data.get("city"):
+                property_obj.city = property_data["city"]
+
+            if not property_obj.locality and property_data.get("locality"):
+                property_obj.locality = property_data["locality"]
+
+            skipped.append({
+                "property_id": property_obj.id,
+                "address": property_obj.address,
+                "reason": "duplicate",
+            })
+        else:
+            property_obj = Property(
+                user_id=user_id,
+                address=property_data["address"],
+                area_sqft=property_data.get("area_sqft"),
+                opening_bid=property_data.get("opening_bid"),
+                price=property_data.get("opening_bid"),
+                property_type=property_data.get("property_type"),
+                survey_number=property_data.get("survey_number"),
+                auction_date=property_data.get("auction_date"),
+                foreclosure_status="scheduled",
+                property_key=property_key,
+            )
+
+            db.add(property_obj)
+            db.flush()
+            saved.append(property_obj)
+
+        # 2. Process documents even if property already exists
+        for document_data in documents:
+            content = document_data.get("content")
+
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+
+            content_hash = (
+                hashlib.sha256(content).hexdigest()
+                if content is not None
+                else None
+            )
+
+            now = datetime.now(timezone.utc)
+
+            document = None
+
+            # Find an existing document by its content.
+            if content_hash:
+                document = (
+                    db.query(Document)
+                    .filter(Document.content_hash == content_hash)
+                    .first()
+                )
+
+            if document is None:
+                # Brand-new document.
+                document = Document(
+                    source_name=document_data["source_name"],
+                    source_url=document_data["source_url"],
+                    document_type=document_data["document_type"],
+                    title=document_data.get("title"),
+                    content_hash=content_hash,
+                    first_seen_at=now,
+                    last_seen_at=now,
+                )
+
+                db.add(document)
+                db.flush()
+
+            else:
+                # Same document seen again.
+                # Preserve its original first_seen_at.
+                document.last_seen_at = now
+
+            # 3. Avoid duplicate property-document relationships
+            existing_relationship = (
+                db.query(PropertyDocument)
+                .filter(
+                    PropertyDocument.property_id == property_obj.id,
+                    PropertyDocument.document_id == document.id,
+                )
+                .first()
+            )
+
+            if existing_relationship:
+                continue
+
+            property_document = PropertyDocument(
+                property_id=property_obj.id,
+                document_id=document.id,
+                relationship_type=document_data["document_type"],
+            )
+
+            db.add(property_document)
+
+    # 4. Update ingestion statistics
+    ingestion_run = (
+        db.query(IngestionRun)
+        .filter(IngestionRun.id == ingestion_run_id)
+        .first()
+    )
+
+    if ingestion_run:
+        ingestion_run.items_created = len(saved)
+        ingestion_run.items_skipped = len(skipped)
+
+    db.commit()
+
+    for property_obj in saved:
+        db.refresh(property_obj)
+
+    return {
+        "saved": saved,
+        "skipped": skipped,
+    }
+
+===== app\services\pdf.py =====
+
+from pathlib import Path
+
+from pypdf import PdfReader
+
+
+def extract_text_from_pdf(
+    pdf_path: str | Path,
+) -> str:
+
+    reader = PdfReader(pdf_path)
+
+    pages = []
+
+    for page in reader.pages:
+        text = page.extract_text()
+
+        if text:
+            pages.append(text)
+
+    return "\n".join(pages)
+
+===== app\services\extraction.py =====
+
+import re
+from datetime import datetime
+
+from app.schemas import ExtractedProperty
+
+def clean_property_address(
+    address: str,
+    area_sqft: float | None,
+    survey_number: str | None,
+) -> str:
+
+    # Remove survey number prefix
+    if survey_number:
+        address = re.sub(
+            rf"\bSy\s+No\s+{re.escape(survey_number)}\s*-\s*",
+            "",
+            address,
+            flags=re.IGNORECASE,
+        )
+
+    # Remove area information
+    if area_sqft is not None:
+        area_number = str(area_sqft).removesuffix(".0")
+
+        address = re.sub(
+            rf"\b{re.escape(area_number)}\s*Sq\s*Ft\s*-?\s*",
+            "",
+            address,
+            flags=re.IGNORECASE,
+        )
+
+    # Clean up leftover separators
+    address = re.sub(r"\s*-\s*", " ", address)
+    address = re.sub(r"\s+", " ", address)
+
+    return address.strip()
+def extract_properties_from_text(
+    text: str,
+) -> list[ExtractedProperty]:
+
+    properties = []
+
+    auction_number_match = re.search(
+        r"Auction No:\s*(.+)",
+        text,
+        re.IGNORECASE,
+    )
+
+    seller_match = re.search(
+        r"Seller:\s*(.+)",
+        text,
+        re.IGNORECASE,
+    )
+
+    auction_start_match = re.search(
+        r"Scheduled Auction Start:\s*(\d{2}-\d{2}-\d{2})\s+(\d{2}:\d{2})",
+        text,
+        re.IGNORECASE,
+    )
+
+    auction_close_match = re.search(
+        r"Scheduled Auction Close:\s*(\d{2}-\d{2}-\d{2})\s+(\d{2}:\d{2})",
+        text,
+        re.IGNORECASE,
+    )
+
+    auction_number = (
+        auction_number_match.group(1).strip()
+        if auction_number_match
+        else None
+    )
+
+    seller_name = (
+        seller_match.group(1).strip()
+        if seller_match
+        else None
+    )
+
+    auction_start = None
+    if auction_start_match:
+        auction_start = datetime.strptime(
+            f"{auction_start_match.group(1)} "
+            f"{auction_start_match.group(2)}",
+            "%d-%m-%y %H:%M",
+        )
+
+    auction_close = None
+    if auction_close_match:
+        auction_close = datetime.strptime(
+            f"{auction_close_match.group(1)} "
+            f"{auction_close_match.group(2)}",
+            "%d-%m-%y %H:%M",
+        )
+
+    lot_sections = re.split(
+        r"Lot No - Doc No",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    for section in lot_sections[1:]:
+
+        document_match = re.search(
+            r"\s*(\d+/\d+)",
+            section,
+        )
+
+        if not document_match:
+            continue
+
+        document_number = document_match.group(1)
+
+        area_match = re.search(
+            r"(\d+(?:\.\d+)?)\s*Sq\s*Ft",
+            section,
+            re.IGNORECASE,
+        )
+
+        opening_bid_match = re.search(
+            r"Start Price in INR\s*-\s*([\d.]+)",
+            section,
+            re.IGNORECASE,
+        )
+
+        pre_bid_emd_match = re.search(
+            r"PRE BID EMD:\s*([\d.]+)",
+            section,
+            re.IGNORECASE,
+        )
+
+        increment_match = re.search(
+            r"Minimum\s+Increment:\s*([\d.]+)",
+            section,
+            re.IGNORECASE,
+        )
+
+        post_emd_match = re.search(
+            r"Post Bid EMD %\s*-\s*([\d.]+)",
+            section,
+            re.IGNORECASE,
+        )
+
+        survey_match = re.search(
+            r"(?:Sy No|Survey No)\s*:?\s*([0-9/]+)",
+            section,
+            re.IGNORECASE,
+        )
+
+        property_type_match = re.search(
+            r"Product Type\s*-\s*(.*?)\n",
+            section,
+            re.IGNORECASE,
+        )
+
+        category_match = re.search(
+            r"Category\s*-\s*(.*?)\n",
+            section,
+            re.IGNORECASE,
+        )
+
+        sub_category_match = re.search(
+            r"Sub Category\s*-\s*(.*?)\n",
+            section,
+            re.IGNORECASE,
+        )
+
+        defaulter_match = re.search(
+            r"Defaulter Name:\s*(.*?)\n",
+            section,
+            re.IGNORECASE,
+        )
+
+        lot_location_match = re.search(
+            r"Lot Location\s*-\s*(.*?)(?=\nState\s*:)",
+            section,
+            re.IGNORECASE | re.DOTALL,
+        )
+
+        state_match = re.search(
+            r"Lot State\s*-\s*(.*?)(?=\n|$)",
+            section,
+            re.IGNORECASE,
+        )
+
+        address = None
+
+        if lot_location_match:
+            address = re.sub(
+                r"\s+",
+                " ",
+                lot_location_match.group(1),
+            ).strip()
+
+        pincode = None
+        if address:
+            pincode_match = re.search(
+                r"\b(\d{6})\b",
+                address,
+            )
+
+            if pincode_match:
+                pincode = pincode_match.group(1)
+
+        city = None
+
+        if address:
+            city_match = re.search(
+                r",\s*([A-Za-z ]+)\s+\d{6}\s*$",
+                address,
+            )
+
+            if city_match:
+                city = city_match.group(1).strip()
+
+
+            cleaned_address = clean_property_address(
+            address=address,
+            area_sqft=(
+                float(area_match.group(1))
+                if area_match
+                else None
+            ),
+            survey_number=(
+                survey_match.group(1)
+                if survey_match
+                else None
+            ),
+)    
+        property_data = ExtractedProperty(
+            lot_number=document_number,
+            document_number=document_number,
+
+            property_type=(
+                property_type_match.group(1).strip()
+                if property_type_match
+                else None
+            ),
+
+            category=(
+                category_match.group(1).strip()
+                if category_match
+                else None
+            ),
+
+            sub_category=(
+                sub_category_match.group(1).strip()
+                if sub_category_match
+                else None
+            ),
+
+            defaulter_name=(
+                defaulter_match.group(1).strip()
+                if defaulter_match
+                else None
+            ),
+
+            address=cleaned_address,
+            city=city,
+
+            state=(
+                state_match.group(1).strip()
+                if state_match
+                else None
+            ),
+
+            pincode=pincode,
+
+            area_sqft=(
+                float(area_match.group(1))
+                if area_match
+                else None
+            ),
+
+            survey_number=(
+                survey_match.group(1)
+                if survey_match
+                else None
+            ),
+
+            opening_bid=(
+                float(opening_bid_match.group(1))
+                if opening_bid_match
+                else None
+            ),
+
+            pre_bid_emd=(
+                float(pre_bid_emd_match.group(1))
+                if pre_bid_emd_match
+                else None
+            ),
+
+            minimum_increment=(
+                float(increment_match.group(1))
+                if increment_match
+                else None
+            ),
+
+            post_bid_emd_percent=(
+                float(post_emd_match.group(1))
+                if post_emd_match
+                else None
+            ),
+
+            auction_number=auction_number,
+            auction_start=auction_start,
+            auction_close=auction_close,
+            seller_name=seller_name,
+        )
+
+        properties.append(property_data)
+
+    return properties
+
+===== app\schemas.py =====
+
+from pydantic import BaseModel,ConfigDict
+from datetime import datetime, date
+from typing import Literal
+#Pydantic is a library for validating and shaping data — specifically, checking that Python objects (usually built from JSON) match a schema you define, and converting/rejecting them accordingly
+
+
+
+#This class defines the shape of incoming/outgoing JSON, separate from your database table
+class PropertyCreate(BaseModel):#inheriting from BaseModel means that Pydantic will automatically generate validation logic for this class based on the type hints you provide.
+    address: str
+    city: str | None = None
+    locality: str | None = None
+    price: float | None = None# field: type | None,without = None means the field is required but nullable — the client must include it in the request body, but can send null as its value. That's a common trip-up: people expect | None alone to make it optional to omit, but it doesn't.
+#To make a field genuinely optional (can be omitted entirely), you need a default:
+    bedrooms: int | None = None
+    bathrooms: float | None = None#default value is none
+    area_sqft: int | None = None
+    auction_date: date | None = None#The field is optional, and if omitted, its value is None.
+    foreclosure_status: Literal[#Purpose: Literal["value"] allows type checkers (like mypy) to verify that a variable only holds specific allowed values (e.g., Literal["yes", "no"]).
+        "scheduled",
+        "upcoming",
+        "active",
+        "sold",
+        "cancelled",
+    ] | None = None  
+    opening_bid: float | None = None
+    estimated_value: float | None = None
+    property_type: str | None = None
+    survey_number: str | None = None
+
+class PropertyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    address: str
+    city: str | None
+    locality: str | None
+    price: float | None
+    bedrooms: int | None
+    bathrooms: float | None
+    area_sqft: int | None
+    auction_date: date | None #It can be date or None, but the field itself is required.
+    foreclosure_status: str | None
+    opening_bid: float | None
+    estimated_value: float | None
+    property_type: str | None
+    survey_number: str | None = None
+    discount_percentage: float | None = None
+    deal_score: float | None = None
+
+class PropertyUpdate(BaseModel):
+    address: str | None = None
+    price: float | None = None
+    bedrooms: int | None = None
+    bathrooms: float | None = None
+    area_sqft: int | None = None
+    auction_date: date | None=None
+    foreclosure_status: Literal[#Purpose: Literal["value"] allows type checkers (like mypy) to verify that a variable only holds specific allowed values (e.g., Literal["yes", "no"]).
+        "scheduled",
+        "upcoming",
+        "active",
+        "sold",
+        "cancelled",
+    ] | None = None
+    opening_bid: float | None=None
+    estimated_value: float | None=None
+    property_type: str | None=None
+    survey_number: str | None = None
+class UserCreate(BaseModel):
+    email: str
+    password: str
+#####################33 don't CREATE SPACE BETWEEN THESE CLASSES
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    role: str
+    #The hash should never be returned as part of the normal user response either.
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class PropertyListResponse(BaseModel):
+    items: list[PropertyResponse]
+    page: int
+    limit: int
+    total: int
+    pages: int
+
+class PropertyAnalysis(BaseModel):
+    estimated_value: float | None
+    opening_bid: float | None
+    discount_amount: float | None
+    discount_percentage: float | None
+    price_per_sqft: float | None
+    potential_upside: float | None
+    risk_level: int | None
+    deal_rating: str | None
+    deal_score: float | None
+    valuation_confidence: float | None
+
+class PropertyAIAnalysis(BaseModel):
+    summary: str
+    strengths: list[str]
+    risks: list[str]
+    due_diligence: list[str]
+    recommendation: str
+
+class ExtractedProperty(BaseModel):
+    lot_number: str | None = None
+    document_number: str | None = None
+
+    property_type: str | None = None
+    category: str | None = None
+    sub_category: str | None = None
+
+    defaulter_name: str | None = None
+
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    pincode: str | None = None
+
+    area_sqft: float | None = None
+    survey_number: str | None = None
+
+    opening_bid: float | None = None
+    pre_bid_emd: float | None = None
+    minimum_increment: float | None = None
+    post_bid_emd_percent: float | None = None
+
+    auction_number: str | None = None
+    auction_start: datetime | None = None
+    auction_close: datetime | None = None
+
+    seller_name: str | None = None
+
+class PropertyValuationCreate(BaseModel):
+    estimated_value: float
+    valuation_method: str
+    source: str | None = None
+    confidence: float | None = None
+    valuation_date: date | None = None
+
+
+class PropertyValuationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    property_id: int
+    estimated_value: float
+    valuation_method: str
+    source: str | None
+    confidence: float | None
+    valuation_date: date
+
+class MarketComparableCreate(BaseModel):
+    address: str
+    city: str | None = None
+    locality: str | None = None
+    property_type: str | None = None
+    area_sqft: int
+    sale_price: float
+    sale_date: date | None = None
+    source: str
+    source_url: str | None = None
+
+
+class MarketComparableResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    address: str
+    city: str | None
+    locality: str | None
+    property_type: str | None
+    area_sqft: int
+    sale_price: float
+    sale_date: date | None
+    source: str
+    source_url: str | None
+
+===== app\models.py =====
+
+from sqlalchemy import Integer, Numeric, String, ForeignKey, Date, DateTime
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column,relationship
+from app.database import Base
+from datetime import date, datetime  
+
+#SQLAlchemy model Represents the database.
+#Python class that represents one table in your database. Each class attribute maps to one column. It's the bridge that lets you write Python code instead of raw SQL strings to interact with the database.
+
+
+class Property(Base):
+    __tablename__ = "properties"#__tablename__ is you explicitly telling it: "when you generate SQL for this class — SELECT, INSERT, UPDATE, whatever — target the table literally named properties."
+    # Concretely, this line is what makes this SQL work when you later call db.query(Property):
+    user_id: Mapped[int] = mapped_column("userid",Integer,ForeignKey("users.id"),nullable=False)
+
+    user: Mapped["User"] = relationship(
+        back_populates="properties")
+
+    valuations: Mapped[list["PropertyValuation"]] = relationship(
+    back_populates="property"#This lets SQLAlchemy naturally express “this property has many valuation records.”
+)
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True
+    )
+
+    address: Mapped[str] = mapped_column(String, nullable=False)
+
+    city: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    locality: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+    price: Mapped[float | None] = mapped_column(
+        Numeric,
+        index=True
+    )
+
+    bedrooms: Mapped[int | None] = mapped_column(
+        Integer,
+        index=True
+    )
+
+    bathrooms: Mapped[float | None] = mapped_column(
+        Numeric
+    )
+
+    area_sqft: Mapped[int | None] = mapped_column(
+        Integer
+    )
+    auction_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True
+    )##
+
+    foreclosure_status: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )
+
+    opening_bid: Mapped[float | None] = mapped_column(
+        Numeric,
+        nullable=True
+    )
+
+    estimated_value: Mapped[float | None] = mapped_column(
+        Numeric,
+        nullable=True
+    )
+
+    property_type: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )
+    
+    survey_number: Mapped[str | None] = mapped_column(
+    String,
+    nullable=True,
+    )
+    
+    property_key: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    properties: Mapped[list["Property"]] = relationship(
+    back_populates="user"
+    )
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True
+    )
+
+    email: Mapped[str] = mapped_column(
+        String,
+        unique=True,# 2 users can't have the same email address. This is a common requirement for user accounts, and SQLAlchemy will enforce it at the database level.
+        nullable=False
+    )
+
+    password_hash: Mapped[str] = mapped_column(
+ # the db never receives the actual password, only the hash of it. This is a security best practice: if your database is ever compromised, the attacker won't have access to users' plaintext passwords.
+        String,
+        nullable=False
+    )
+
+    role: Mapped[str] = mapped_column(
+        String,
+        default="user",
+        nullable=False
+    )
+
+class IngestionRun(Base):
+    __tablename__ = "ingestion_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_name: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    items_found: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    items_created: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    items_skipped: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_name: Mapped[str] = mapped_column(String, nullable=False)
+    source_url: Mapped[str] = mapped_column(String, nullable=False)
+    document_type: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    content_hash: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+class PropertyDocument(Base):
+    __tablename__ = "property_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    property_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("properties.id"),
+        nullable=False,
+    )
+
+    document_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("documents.id"),
+        nullable=False,
+    )
+
+    relationship_type: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+class PropertyValuation(Base):
+    __tablename__ = "property_valuations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    property_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("properties.id"),
+        nullable=False,
+        index=True,
+    )
+
+    property: Mapped["Property"] = relationship(
+       back_populates="valuations"
+    )
+    estimated_value: Mapped[float] = mapped_column(
+        Numeric,
+        nullable=False,
+    )
+
+    valuation_method: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    source: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    confidence: Mapped[float | None] = mapped_column(
+        Numeric,
+        nullable=True,
+    )
+
+    valuation_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+    )   
+
+# Why this table?
+
+# A Property represents the foreclosure/auction property.
+
+# A MarketComparable represents a real residential property used as evidence of market value.
+class MarketComparable(Base):
+    __tablename__ = "market_comparables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    address: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    city: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        index=True,
+    )
+
+    locality: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        index=True,
+    )
+
+    property_type: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        index=True,
+    )
+
+    area_sqft: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    sale_price: Mapped[float] = mapped_column(
+        Numeric,
+        nullable=False,
+    )
+
+    sale_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+
+    source: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    source_url: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )   
+
+    comparable_key: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+class Evidence(Base):
+    __tablename__ = "evidence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    property_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("properties.id"),
+        nullable=False,
+        index=True,
+    )
+
+    document_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("documents.id"),
+        nullable=False,
+        index=True,
+    )
+
+    field: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+    )
+
+    value: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    page_number: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    source_text: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    extraction_method: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    confidence: Mapped[float | None] = mapped_column(
+        Numeric,
+        nullable=True,
+    )    

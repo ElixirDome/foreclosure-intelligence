@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import and_, case
 from math import ceil
 from datetime import date
 from app.models import Property
@@ -118,8 +119,9 @@ def save_extracted_properties(
         "skipped": skipped_properties,
     }
 
-def get_properties(
+def get_properties(#service signature
     db: Session,
+  
     page: int,
     limit: int,
     search: str | None,
@@ -128,22 +130,20 @@ def get_properties(
     bedrooms: int | None,
     sort_by: str,
     order: str,
-    min_area: int | None,
-    max_area: int | None,
+    min_area: int | None ,
+    max_area: int | None,# Query() belongs in the route. Plain int | None belongs in the service.
     min_discount: float | None,
     max_discount: float | None,
     foreclosure_status: str | None,
     auction_date_from: date | None,
     auction_date_to: date | None,
 ):
-    """
-    Query properties with calculated deal metrics.
-
-    Database-specific SQL expressions live here, while the
-    underlying business rules are defined in
-    app.domain.deal_analysis.
-    """
-
+# 1. Build base query
+# 2. Create discount_percentage SQL expression
+# 3. Apply filters
+# 4. Apply sorting
+# 5. Pagination
+# 6. Execute query
     discount_percentage = case(
         (
             and_(
@@ -162,59 +162,37 @@ def get_properties(
         ),
         else_=None,
     ).label("discount_percentage")
-
+    
     risk_level = case(
-        *[
-            (
-                func.lower(Property.foreclosure_status) == status,
-                risk,
-            )
-            for status, risk in FORECLOSURE_RISK_LEVELS.items()
-        ],
-        else_=2,
-    )
-
-    raw_deal_score = (
-        discount_percentage
-        - (risk_level * DEAL_SCORE_RISK_MULTIPLIER)
-    )
-
+    *[
+        (Property.foreclosure_status == status, risk)
+        for status, risk in FORECLOSURE_RISK_LEVELS.items()
+    ],
+    else_=2,
+)
     deal_score = case(
-        (
-            discount_percentage.is_(None),
-            None,
-        ),
-        (
-            raw_deal_score < 0,
-            0,
-        ),
-        (
-            raw_deal_score > 100,
-            100,
-        ),
-        else_=raw_deal_score,
-    ).label("deal_score")
-
-    query = db.query(
-        Property,
-        discount_percentage,
-        deal_score,
-    )
-
-    # Search
+    (
+        discount_percentage.is_not(None),
+       discount_percentage - (
+       risk_level * DEAL_SCORE_RISK_MULTIPLIER),
+    ),
+    else_=None,
+).label("deal_score")
+     
+    query = db.query(Property,discount_percentage,
+                     deal_score)#Yep — I see the bug immediately. Your filtering logic is correct. The problem is that you build the filtered query, but then you throw it away when fetching the properties.
+#UnboundLocalError: cannot access local variable 'discount_percentage' where it is not associated with a value
     if search:
         query = query.filter(
             Property.address.ilike(f"%{search.strip()}%")
         )
-
-    # Price filters
+####3##########3 SQL filters
     if min_price is not None:
         query = query.filter(Property.price >= min_price)
 
     if max_price is not None:
         query = query.filter(Property.price <= max_price)
 
-    # Property filters
     if bedrooms is not None:
         query = query.filter(Property.bedrooms == bedrooms)
 
@@ -224,60 +202,56 @@ def get_properties(
     if max_area is not None:
         query = query.filter(Property.area_sqft <= max_area)
 
-    # Discount filters
     if min_discount is not None:
-        query = query.filter(
-            Property.estimated_value.is_not(None),
-            Property.opening_bid.is_not(None),
-            Property.estimated_value > 0,
+     query = query.filter(
+        Property.estimated_value.is_not(None),
+        Property.opening_bid.is_not(None),
+        Property.estimated_value > 0,
+        (
             (
-                (
-                    Property.estimated_value
-                    - Property.opening_bid
-                )
-                / Property.estimated_value
-                * 100
-            ) >= min_discount,
-        )
-
+                Property.estimated_value
+                - Property.opening_bid
+            )
+            / Property.estimated_value
+            * 100
+        ) >= min_discount
+    )    
     if max_discount is not None:
-        query = query.filter(
-            Property.estimated_value.is_not(None),
-            Property.opening_bid.is_not(None),
-            Property.estimated_value > 0,
+     query = query.filter(
+        Property.estimated_value.is_not(None),
+        Property.opening_bid.is_not(None),
+        Property.estimated_value > 0,
+        (
             (
-                (
-                    Property.estimated_value
-                    - Property.opening_bid
-                )
-                / Property.estimated_value
-                * 100
-            ) <= max_discount,
-        )
-
-    # Foreclosure status
+                Property.estimated_value
+                - Property.opening_bid
+            )
+            / Property.estimated_value
+            * 100
+        ) <= max_discount
+    )
+     
     if foreclosure_status is not None:
-        query = query.filter(
-            func.lower(Property.foreclosure_status)
-            == foreclosure_status.lower()
-        )
-
-    # Auction date filters
+      query = query.filter(
+        Property.foreclosure_status == foreclosure_status
+    )
     if auction_date_from is not None:
-        query = query.filter(
-            Property.auction_date >= auction_date_from
-        )
+       query = query.filter(
+        Property.auction_date >= auction_date_from
+    )
 
     if auction_date_to is not None:
-        query = query.filter(
-            Property.auction_date <= auction_date_to
-        )
-
-    # Pagination count
+      query = query.filter(
+        Property.auction_date <= auction_date_to
+    )
+      
+   
+    
+###############################PAGINATION
     total = query.count()
 
-    # Sorting whitelist
-    sort_fields = {
+
+    sort_fields = {#whitelist #client input  :  SQLAlchemy column
         "id": Property.id,
         "price": Property.price,
         "bedrooms": Property.bedrooms,
@@ -298,47 +272,44 @@ def get_properties(
     else:
         query = query.order_by(sort_column.asc())
 
-    # Pagination
     offset = (page - 1) * limit
 
     results = (
-        query
+        query#not db.query(property) that will be throwing away all the filters
         .offset(offset)
         .limit(limit)
         .all()
     )
 
     properties = []
-
-    for property, discount, score in results:
-        property_data = {
-            "id": property.id,
-            "address": property.address,
-            "city": property.city,
-            "locality": property.locality,
-            "price": property.price,
-            "bedrooms": property.bedrooms,
-            "bathrooms": property.bathrooms,
-            "area_sqft": property.area_sqft,
-            "auction_date": property.auction_date,
-            "foreclosure_status": property.foreclosure_status,
-            "opening_bid": property.opening_bid,
-            "estimated_value": property.estimated_value,
-            "property_type": property.property_type,
-            "discount_percentage": (
-                float(discount)
-                if discount is not None
-                else None
-            ),
-            "deal_score": (
-                float(score)
-                if score is not None
-                else None
-            ),
-        }
-
-        properties.append(property_data)
-
+# Tuple Unpacking in Loop: for property, discount, score in results: expects each item in results to be a 3-element tuple or list. In each iteration, it unpacks those three elements into the local variables property, discount, and score.
+# Dictionary Construction: property_data = { ... } constructs a dictionary for the current item, combining fields from property alongside calculated metrics like discount and score.
+# Outer Appending (The Current Code): Because properties.append(property_data) is outside the loop (no indentation), it runs only once after the loop finishes. Consequently, properties will only receive the very last property_data generated by the final iteration.
+    for property, discount, score in results:#The too many values to unpack error means your query is returning three values, but somewhere you're still unpacking only two.
+     property_data = {
+        "id": property.id,
+        "address": property.address,
+        "city": property.city,
+        "locality": property.locality,
+        "price": property.price,
+        "bedrooms": property.bedrooms,
+        "bathrooms": property.bathrooms,
+        "area_sqft": property.area_sqft,
+        "auction_date": property.auction_date,
+        "foreclosure_status": property.foreclosure_status,
+        "opening_bid": property.opening_bid,
+        "estimated_value": property.estimated_value,
+        "property_type": property.property_type,
+        # But the dictionary currently uses discount_percentage and deal_score, which are SQLAlchemy expressions.
+       "discount_percentage": (
+            float(discount) if discount is not None else None
+        ),
+        "deal_score": float(score) if score is not None else None,
+       }
+     properties.append(property_data)#properties.append(property) So you're returning the raw Property object instead of the property_data dictionary containing the calculated values.
+#    ^
+#    |
+#Notice the indentation: properties.append(property_data) must be inside the for loop.
     pages = ceil(total / limit)
 
     return {
@@ -346,10 +317,8 @@ def get_properties(
         "page": page,
         "limit": limit,
         "total": total,
-        "pages": pages,
+        "pages": pages
     }
-
-
 def update_property(
     db: Session,
     property: Property,

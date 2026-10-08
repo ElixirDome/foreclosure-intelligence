@@ -1,6 +1,5 @@
-from datetime import datetime, timezone
+from datetime import datetime
 import traceback
-
 from sqlalchemy.orm import Session
 
 from app.ingestion.base import SourceAdapter
@@ -15,7 +14,7 @@ def run_ingestion(
 ):
     ingestion_run = IngestionRun(
         source_name=adapter.__class__.__name__,
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.utcnow(),
         status="running",
     )
 
@@ -36,30 +35,18 @@ def run_ingestion(
 
             documents = adapter.get_documents(item)
 
-            get_evidence = getattr(
-                adapter,
-                "get_evidence",
-                None,
-            )
-
-            evidence = (
-                get_evidence(item)
-                if get_evidence
-                else []
-            )
-
             if isinstance(extracted, list):
                 for property_data in extracted:
                     extracted_items.append({
                         "property": property_data,
                         "documents": documents,
-                        "evidence": evidence,
                     })
             else:
+                # Keep compatibility with adapters that return
+                # a single property dictionary.
                 extracted_items.append({
                     "property": extracted,
                     "documents": documents,
-                    "evidence": evidence,
                 })
 
         save_result = save_ingested_properties(
@@ -69,7 +56,7 @@ def run_ingestion(
             ingestion_run_id=ingestion_run.id,
         )
 
-        ingestion_run.finished_at = datetime.now(timezone.utc)
+        ingestion_run.finished_at = datetime.utcnow()
         ingestion_run.status = "success"
         ingestion_run.items_found = len(raw_items)
 
@@ -87,7 +74,7 @@ def run_ingestion(
 
         traceback.print_exc()
 
-        ingestion_run.finished_at = datetime.now(timezone.utc)
+        ingestion_run.finished_at = datetime.utcnow()
         ingestion_run.status = "failed"
         ingestion_run.error_message = str(exc)
 

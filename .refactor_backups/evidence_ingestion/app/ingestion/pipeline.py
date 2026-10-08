@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 import traceback
-
 from sqlalchemy.orm import Session
 
 from app.ingestion.base import SourceAdapter
@@ -36,30 +35,18 @@ def run_ingestion(
 
             documents = adapter.get_documents(item)
 
-            get_evidence = getattr(
-                adapter,
-                "get_evidence",
-                None,
-            )
-
-            evidence = (
-                get_evidence(item)
-                if get_evidence
-                else []
-            )
-
             if isinstance(extracted, list):
                 for property_data in extracted:
                     extracted_items.append({
                         "property": property_data,
                         "documents": documents,
-                        "evidence": evidence,
                     })
             else:
+                # Keep compatibility with adapters that return
+                # a single property dictionary.
                 extracted_items.append({
                     "property": extracted,
                     "documents": documents,
-                    "evidence": evidence,
                 })
 
         save_result = save_ingested_properties(

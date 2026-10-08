@@ -1,30 +1,15 @@
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from app.models import (
     Document,
-    Evidence,
     IngestionRun,
     Property,
     PropertyDocument,
 )
 from app.services.normalization import create_property_key
-
-
-def _evidence_value(evidence):
-    if isinstance(evidence, dict):
-        return evidence
-
-    return {
-        "field": evidence.field,
-        "value": evidence.value,
-        "page_number": evidence.page_number,
-        "source_text": evidence.source_text,
-        "extraction_method": evidence.extraction_method,
-        "confidence": evidence.confidence,
-    }
 
 
 def save_ingested_properties(
@@ -39,7 +24,6 @@ def save_ingested_properties(
     for item in properties:
         property_data = item["property"]
         documents = item["documents"]
-        evidence_items = item.get("evidence", [])
 
         property_key = create_property_key(
             address=property_data["address"],
@@ -48,6 +32,7 @@ def save_ingested_properties(
             survey_number=property_data.get("survey_number"),
         )
 
+        # 1. Find or create the property
         property_obj = (
             db.query(Property)
             .filter(Property.property_key == property_key)
@@ -66,7 +51,6 @@ def save_ingested_properties(
                 "address": property_obj.address,
                 "reason": "duplicate",
             })
-
         else:
             property_obj = Property(
                 user_id=user_id,
@@ -85,6 +69,7 @@ def save_ingested_properties(
             db.flush()
             saved.append(property_obj)
 
+        # 2. Process documents even if property already exists
         for document_data in documents:
             content = document_data.get("content")
 
@@ -97,20 +82,20 @@ def save_ingested_properties(
                 else None
             )
 
-            now = datetime.now(timezone.utc)
+            now = datetime.utcnow()
 
             document = None
 
+            # Find an existing document by its content.
             if content_hash:
                 document = (
                     db.query(Document)
-                    .filter(
-                        Document.content_hash == content_hash
-                    )
+                    .filter(Document.content_hash == content_hash)
                     .first()
                 )
 
             if document is None:
+                # Brand-new document.
                 document = Document(
                     source_name=document_data["source_name"],
                     source_url=document_data["source_url"],
@@ -125,8 +110,11 @@ def save_ingested_properties(
                 db.flush()
 
             else:
+                # Same document seen again.
+                # Preserve its original first_seen_at.
                 document.last_seen_at = now
 
+            # 3. Avoid duplicate property-document relationships
             existing_relationship = (
                 db.query(PropertyDocument)
                 .filter(
@@ -136,54 +124,18 @@ def save_ingested_properties(
                 .first()
             )
 
-            if not existing_relationship:
-                property_document = PropertyDocument(
-                    property_id=property_obj.id,
-                    document_id=document.id,
-                    relationship_type=document_data[
-                        "document_type"
-                    ],
-                )
+            if existing_relationship:
+                continue
 
-                db.add(property_document)
+            property_document = PropertyDocument(
+                property_id=property_obj.id,
+                document_id=document.id,
+                relationship_type=document_data["document_type"],
+            )
 
-            # Evidence belongs to the property + document.
-            # We avoid inserting the same field/value/page
-            # repeatedly when the same PDF is ingested again.
-            for raw_evidence in evidence_items:
-                evidence_data = _evidence_value(raw_evidence)
+            db.add(property_document)
 
-                existing_evidence = (
-                    db.query(Evidence)
-                    .filter(
-                        Evidence.property_id == property_obj.id,
-                        Evidence.document_id == document.id,
-                        Evidence.field == evidence_data["field"],
-                        Evidence.value == evidence_data["value"],
-                        Evidence.page_number
-                        == evidence_data["page_number"],
-                    )
-                    .first()
-                )
-
-                if existing_evidence:
-                    continue
-
-                db.add(
-                    Evidence(
-                        property_id=property_obj.id,
-                        document_id=document.id,
-                        field=evidence_data["field"],
-                        value=evidence_data["value"],
-                        page_number=evidence_data["page_number"],
-                        source_text=evidence_data["source_text"],
-                        extraction_method=evidence_data[
-                            "extraction_method"
-                        ],
-                        confidence=evidence_data["confidence"],
-                    )
-                )
-
+    # 4. Update ingestion statistics
     ingestion_run = (
         db.query(IngestionRun)
         .filter(IngestionRun.id == ingestion_run_id)

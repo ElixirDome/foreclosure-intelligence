@@ -192,24 +192,29 @@ def calculate_valuation_confidence(
         2,
     )
 
-def calculate_valuation_from_comparables(
-    area_sqft: int | float,
-    comparables: list[MarketComparable],
+def calculate_market_valuation(
+    db: Session,
+    property_obj: Property,
 ):
-    """
-    Pure market-valuation calculation.
+    if property_obj.area_sqft is None:
+        raise ValueError(
+            "Property area_sqft is required for market valuation"
+        )
 
-    This function does not access the database and does not
-    modify any records.
-
-    It receives the target property's area and the comparable
-    sales selected for it, then calculates the valuation.
-    """
-
-    if area_sqft <= 0:
+    if property_obj.area_sqft <= 0:
         raise ValueError(
             "Property area_sqft must be greater than 0"
         )
+
+    if not property_obj.city:
+        raise ValueError(
+            "Property city is required for market valuation"
+        )
+
+    comparables = find_comparables(
+        db=db,
+        property_obj=property_obj,
+    )
 
     if len(comparables) < MIN_COMPARABLES:
         raise ValueError(
@@ -247,8 +252,8 @@ def calculate_valuation_from_comparables(
         )
 
     estimated_value = (
-        median_price_per_sqft
-        * area_sqft
+    median_price_per_sqft
+    * property_obj.area_sqft
     )
 
     confidence = calculate_valuation_confidence(
@@ -265,40 +270,3 @@ def calculate_valuation_from_comparables(
             "residential_comparable_sales"
         ),
     }
-
-
-def calculate_market_valuation(
-    db: Session,
-    property_obj: Property,
-):
-    """
-    Calculate a market valuation using database comparables.
-
-    Database access is kept here. The actual valuation
-    calculation is delegated to the pure calculation function.
-    """
-
-    if property_obj.area_sqft is None:
-        raise ValueError(
-            "Property area_sqft is required for market valuation"
-        )
-
-    if property_obj.area_sqft <= 0:
-        raise ValueError(
-            "Property area_sqft must be greater than 0"
-        )
-
-    if not property_obj.city:
-        raise ValueError(
-            "Property city is required for market valuation"
-        )
-
-    comparables = find_comparables(
-        db=db,
-        property_obj=property_obj,
-    )
-
-    return calculate_valuation_from_comparables(
-        area_sqft=property_obj.area_sqft,
-        comparables=comparables,
-    )
