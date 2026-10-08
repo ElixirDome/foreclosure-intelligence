@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import api from "../api/client";
 
 interface SkippedProperty {
@@ -64,6 +65,12 @@ function Import() {
 
   return (
     <div className="page">
+      <nav className="navbar">
+        <Link to="/dashboard">Dashboard</Link>
+        <Link to="/research">Research</Link>
+        <Link to="/admin/import">Import</Link>
+      </nav>
+
       <h1>Import Auction PDF</h1>
       <p>Upload an auction PDF to extract and save properties.</p>
 

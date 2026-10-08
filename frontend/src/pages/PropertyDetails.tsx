@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import api from "../api/client";
+import { analyzeInvestment, getPropertyEvidence, getPropertyDeal } from "../api/rag";
+import type { EvidenceItem, DealIntelligence, RAGResponse } from "../api/types";
+import RagResult from "../components/RagResult";
 
 interface Property {
   id: number;
@@ -65,6 +68,44 @@ function PropertyDetails() {
 
   const [marketValuationLoading, setMarketValuationLoading] = useState(false);
   const [marketValuationError, setMarketValuationError] = useState("");
+
+  const [investmentResult, setInvestmentResult] = useState<RAGResponse | null>(null);
+  const [investmentLoading, setInvestmentLoading] = useState(false);
+  const [investmentError, setInvestmentError] = useState("");
+  const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
+  const [dealIntel, setDealIntel] = useState<DealIntelligence | null>(null);
+
+
+
+  useEffect(() => {
+    if (!id) return;
+
+    getPropertyEvidence(Number(id))
+      .then(setEvidence)
+      .catch(() => setEvidence([]));
+
+    getPropertyDeal(Number(id))
+      .then(setDealIntel)
+      .catch(() => setDealIntel(null));
+  }, [id]);
+
+  async function handleInvestmentAnalysis() {
+    if (!id) return;
+    try {
+      setInvestmentLoading(true);
+      setInvestmentError("");
+      const result = await analyzeInvestment({
+        property_id: Number(id),
+        question: `Is property ${id} a good foreclosure investment?`,
+      });
+      setInvestmentResult(result);
+    } catch (err) {
+      console.error(err);
+      setInvestmentError("Could not run investment analysis.");
+    } finally {
+      setInvestmentLoading(false);
+    }
+  }
 
   async function handleAddValuation() {
     try {
@@ -196,14 +237,20 @@ function PropertyDetails() {
         <p className="error">
           {error || "Property not found."}
         </p>
-        <Link to="/dashboard">← Back to properties</Link>
+        <div className="navbar">
+        <Link to="/dashboard">← Properties</Link>
+        <Link to="/research">Research</Link>
+      </div>
       </div>
     );
   }
 
   return (
     <div className="page">
-      <Link to="/dashboard">← Back to properties</Link>
+      <div className="navbar">
+        <Link to="/dashboard">← Properties</Link>
+        <Link to="/research">Research</Link>
+      </div>
 
       <div className="details-container">
         <div className="card-top">
@@ -443,6 +490,90 @@ function PropertyDetails() {
           )}
         </div>
       </div>
+
+      {/* Multi-source investment analysis (Phase 11 RAG) */}
+      <div className="analysis-container">
+        <div className="section-header-row">
+          <h2>Investment analysis (multi-source RAG)</h2>
+          <button
+            onClick={handleInvestmentAnalysis}
+            disabled={investmentLoading}
+          >
+            {investmentLoading ? "Analyzing…" : "Run investment analysis"}
+          </button>
+        </div>
+        <p className="muted">
+          Pulls auction documents, this property, evidence, comparables,
+          valuations, and deal signals into one cited answer.
+        </p>
+        {investmentError && <p className="error">{investmentError}</p>}
+        {investmentResult && <RagResult result={investmentResult} />}
+        {!investmentResult && !investmentLoading && (
+          <p className="muted">Click the button to generate a structured recommendation.</p>
+        )}
+      </div>
+
+      {/* Deal intelligence factors */}
+      {dealIntel && (
+        <div className="analysis-container">
+          <h2>Deal intelligence</h2>
+          <div className="analysis-grid">
+            <div className="analysis-card">
+              <strong>Deal score</strong>
+              <span>{dealIntel.deal_score ?? "N/A"}</span>
+            </div>
+            <div className="analysis-card">
+              <strong>Rating</strong>
+              <span>{dealIntel.deal_rating ?? "N/A"}</span>
+            </div>
+            <div className="analysis-card">
+              <strong>Comparables</strong>
+              <span>{dealIntel.comparable_count}</span>
+            </div>
+          </div>
+          {dealIntel.factors?.length > 0 && (
+            <ul className="factor-list">
+              {dealIntel.factors.map((f, i) => (
+                <li key={i} className={f.direction === "+" ? "pos" : f.direction === "-" ? "neg" : ""}>
+                  {f.direction} {f.label}
+                </li>
+              ))}
+            </ul>
+          )}
+          {dealIntel.explanation && (
+            <pre className="answer-text">{dealIntel.explanation}</pre>
+          )}
+        </div>
+      )}
+
+      {/* Field-level evidence */}
+      <div className="analysis-container">
+        <h2>Source evidence</h2>
+        {evidence.length === 0 && (
+          <p className="muted">No field-level evidence linked yet.</p>
+        )}
+        {evidence.length > 0 && (
+          <div className="citation-list">
+            {evidence.map((e) => (
+              <div className="citation-card" key={e.id}>
+                <div className="citation-head">
+                  <span className="badge badge-ev">{e.field}</span>
+                  <span className="citation-title">{e.value}</span>
+                  <span className="muted">
+                    doc #{e.document_id}
+                    {e.page_number != null ? ` · p.${e.page_number}` : ""}
+                    {e.extraction_method ? ` · ${e.extraction_method}` : ""}
+                  </span>
+                </div>
+                {e.source_text && (
+                  <p className="citation-excerpt">{e.source_text}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Valuation history */}
       <div className="analysis-container">
         <h2>Valuation history</h2>

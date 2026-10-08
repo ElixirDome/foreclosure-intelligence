@@ -4,26 +4,29 @@ import PropertyDetails from "./pages/PropertyDetails";
 import Login from "./pages/Login";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Import from "./pages/Import";
+import Research from "./pages/Research";
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route
-          path="/"
-          element={<Navigate to="/dashboard" replace />}
-        />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-        <Route
-          path="/login"
-          element={<Login />}
-        />
+        <Route path="/login" element={<Login />} />
 
         <Route
           path="/dashboard"
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/research"
+          element={
+            <ProtectedRoute>
+              <Research />
             </ProtectedRoute>
           }
         />

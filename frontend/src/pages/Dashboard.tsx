@@ -130,6 +130,7 @@ function Dashboard() {
     <div className="page">
       <nav className="navbar">
         <Link to="/dashboard">Dashboard</Link>
+        <Link to="/research">Research</Link>
         <Link to="/admin/import">Import PDF</Link>
         <button onClick={handleLogout}>Logout</button>
       </nav>
