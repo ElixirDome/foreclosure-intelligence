@@ -24,37 +24,48 @@ function kindClass(kind: string): string {
 }
 
 export default function RagResult({ result }: Props) {
-  const structured = result.structured;
+  if (!result) {
+    return null;
+  }
+
+  const structured = result.structured ?? null;
+  const strengths = structured?.strengths ?? [];
+  const risks = structured?.risks ?? [];
+  const diligence = structured?.due_diligence ?? [];
+  const citations = result.citations ?? [];
 
   return (
     <div className="rag-result">
       <div className="rag-meta">
-        <span className="badge">{result.method}</span>
+        <span className="badge">{result.method ?? "rag"}</span>
         <span className="muted">
           {result.context_kinds?.length
             ? result.context_kinds.join(" · ")
             : "no sources"}
         </span>
-        <span className="muted">{result.chunks_used} doc chunks</span>
+        <span className="muted">{result.chunks_used ?? 0} doc chunks</span>
       </div>
 
       {structured && (
         <div className="structured-panel">
-          <p className="structured-summary">{structured.summary}</p>
+          {structured.summary && (
+            <p className="structured-summary">{structured.summary}</p>
+          )}
 
           {structured.deal_score != null && (
             <p className="deal-score-line">
-              Deal score: <strong>{structured.deal_score.toFixed(0)}/100</strong>
+              Deal score:{" "}
+              <strong>{Number(structured.deal_score).toFixed(0)}/100</strong>
               {structured.deal_rating ? ` (${structured.deal_rating})` : ""}
             </p>
           )}
 
           <div className="structured-columns">
-            {structured.strengths?.length > 0 && (
+            {strengths.length > 0 && (
               <div>
                 <h4>Strengths</h4>
                 <ul>
-                  {structured.strengths.map((s) => (
+                  {strengths.map((s) => (
                     <li key={s} className="pos">
                       + {s}
                     </li>
@@ -62,11 +73,11 @@ export default function RagResult({ result }: Props) {
                 </ul>
               </div>
             )}
-            {structured.risks?.length > 0 && (
+            {risks.length > 0 && (
               <div>
                 <h4>Risks</h4>
                 <ul>
-                  {structured.risks.map((r) => (
+                  {risks.map((r) => (
                     <li key={r} className="neg">
                       − {r}
                     </li>
@@ -74,11 +85,11 @@ export default function RagResult({ result }: Props) {
                 </ul>
               </div>
             )}
-            {structured.due_diligence?.length > 0 && (
+            {diligence.length > 0 && (
               <div>
                 <h4>Due diligence</h4>
                 <ul>
-                  {structured.due_diligence.map((d) => (
+                  {diligence.map((d) => (
                     <li key={d}>· {d}</li>
                   ))}
                 </ul>
@@ -97,26 +108,33 @@ export default function RagResult({ result }: Props) {
 
       <div className="answer-block">
         <h4>Answer</h4>
-        <pre className="answer-text">{result.answer}</pre>
+        <pre className="answer-text">{result.answer ?? ""}</pre>
       </div>
 
-      {result.citations?.length > 0 && (
+      {citations.length > 0 && (
         <div className="citations">
           <h4>Citations / evidence</h4>
           <div className="citation-list">
-            {result.citations.map((c, idx) => (
-              <div className="citation-card" key={`${c.source_id}-${idx}`}>
+            {citations.map((c, idx) => (
+              <div className="citation-card" key={`${c.source_id ?? "c"}-${idx}`}>
                 <div className="citation-head">
-                  <span className={kindClass(c.kind)}>{c.kind}</span>
+                  <span className={kindClass(c.kind || "document")}>
+                    {c.kind || "document"}
+                  </span>
                   <span className="citation-title">
                     {c.title || c.source_id || `source ${idx + 1}`}
                   </span>
                   <span className="muted">
-                    score {c.score?.toFixed?.(2) ?? c.score}
+                    score{" "}
+                    {typeof c.score === "number"
+                      ? c.score.toFixed(2)
+                      : String(c.score ?? "")}
                     {c.page_number != null ? ` · p.${c.page_number}` : ""}
                   </span>
                 </div>
-                <p className="citation-excerpt">{c.excerpt}</p>
+                {c.excerpt && (
+                  <p className="citation-excerpt">{c.excerpt}</p>
+                )}
               </div>
             ))}
           </div>

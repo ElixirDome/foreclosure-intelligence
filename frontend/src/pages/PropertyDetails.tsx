@@ -5,6 +5,20 @@ import { analyzeInvestment, getPropertyEvidence, getPropertyDeal } from "../api/
 import type { EvidenceItem, DealIntelligence, RAGResponse } from "../api/types";
 import RagResult from "../components/RagResult";
 
+function formatINR(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "N/A";
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return String(value);
+  return `₹${n.toLocaleString("en-IN")}`;
+}
+
+function formatPct(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "N/A";
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return "N/A";
+  return `${n}%`;
+}
+
 interface Property {
   id: number;
   address: string;
@@ -318,7 +332,7 @@ function PropertyDetails() {
           <div className="analysis-card">
             <strong>Valuation confidence</strong>
             <span>
-              {analysis.valuation_confidence !== null
+              {analysis?.valuation_confidence != null
                 ? `${(analysis.valuation_confidence * 100).toFixed(0)}%`
                 : "N/A"}
             </span>
@@ -418,7 +432,7 @@ function PropertyDetails() {
             <div className="analysis-card">
               <strong>Estimated market value</strong>
               <span>
-                ₹{marketValuation.estimated_value.toLocaleString("en-IN")}
+                {formatINR(marketValuation.estimated_value)}
               </span>
             </div>
 
@@ -590,7 +604,7 @@ function PropertyDetails() {
               <div className="analysis-card" key={valuation.id}>
                 <strong>Estimated value</strong>
                 <span>
-                  ₹{valuation.estimated_value.toLocaleString("en-IN")}
+                  {formatINR(valuation.estimated_value)}
                 </span>
 
                 <strong>Method</strong>
@@ -601,8 +615,8 @@ function PropertyDetails() {
 
                 <strong>Confidence</strong>
                 <span>
-                  {valuation.confidence !== null
-                    ? `${valuation.confidence * 100}%`
+                  {valuation.confidence != null
+                    ? `${Number(valuation.confidence) * 100}%`
                     : "N/A"}
                 </span>
 

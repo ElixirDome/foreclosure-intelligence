@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Import from "./pages/Import";
 import Research from "./pages/Research";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 function App() {
   return (
@@ -26,7 +27,9 @@ function App() {
           path="/research"
           element={
             <ProtectedRoute>
-              <Research />
+              <ErrorBoundary>
+                <Research />
+              </ErrorBoundary>
             </ProtectedRoute>
           }
         />
@@ -42,7 +45,9 @@ function App() {
           path="/properties/:id"
           element={
             <ProtectedRoute>
-              <PropertyDetails />
+              <ErrorBoundary>
+                <PropertyDetails />
+              </ErrorBoundary>
             </ProtectedRoute>
           }
         />
