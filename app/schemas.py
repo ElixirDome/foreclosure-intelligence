@@ -288,26 +288,54 @@ class RAGRequest(BaseModel):
     question: str
     mode: Literal["keyword", "vector", "hybrid"] = "hybrid"
     document_id: int | None = None
+    property_id: int | None = None
     limit: int = 6
+    # None = auto (investment questions / property_id → multi-source)
+    multi_source: bool | None = None
 
 
 class CitationResponse(BaseModel):
-    document_id: int
-    chunk_id: int
-    page_number: int | None
-    filename: str | None
-    source_name: str | None
+    kind: str = "document"
+    source_id: str | None = None
+    title: str | None = None
     excerpt: str
     score: float
+    document_id: int | None = None
+    chunk_id: int | None = None
+    page_number: int | None = None
+    property_id: int | None = None
+    filename: str | None = None
+    source_name: str | None = None
+
+
+class StructuredAnalysisResponse(BaseModel):
+    summary: str
+    strengths: list[str] = []
+    risks: list[str] = []
+    due_diligence: list[str] = []
+    recommendation: str = ""
+    deal_score: float | None = None
+    deal_rating: str | None = None
 
 
 class RAGResponse(BaseModel):
     question: str
     answer: str
     citations: list[CitationResponse]
+    structured: StructuredAnalysisResponse | None = None
+    context_kinds: list[str] = []
+    property_ids: list[int] = []
+    document_ids: list[int] = []
     chunks_used: int
     method: str
     mode: str
+
+
+class InvestmentAnalysisRequest(BaseModel):
+    property_id: int
+    question: str | None = None
+    mode: Literal["keyword", "vector", "hybrid"] = "hybrid"
+
 
 
 class DealFactorResponse(BaseModel):

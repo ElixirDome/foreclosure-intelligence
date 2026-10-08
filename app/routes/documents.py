@@ -17,8 +17,10 @@ from app.schemas import (
     RetrievedChunkResponse,
     StructuredExtractionResponse,
     StructuredFieldEvidence,
+    StructuredAnalysisResponse,
+    InvestmentAnalysisRequest,
 )
-from app.services.rag import answer_question
+from app.services.rag import answer_question, analyze_investment
 from app.services.retrieval import index_document_embeddings, retrieve
 from app.services.structured_extraction import extract_from_document
 
@@ -131,32 +133,80 @@ def retrieve_chunks(body: RetrieveRequest, db: Session = Depends(get_db)):
     ]
 
 
-@router.post("/rag", response_model=RAGResponse)
-def rag_answer(body: RAGRequest, db: Session = Depends(get_db)):
-    result = answer_question(
-        db,
-        body.question,
-        mode=body.mode,
-        document_id=body.document_id,
-        limit=body.limit,
-        provider=None,
-    )
+def _rag_to_response(result) -> RAGResponse:
+    structured = None
+    if result.structured is not None:
+        structured = StructuredAnalysisResponse(
+            summary=result.structured.summary,
+            strengths=result.structured.strengths,
+            risks=result.structured.risks,
+            due_diligence=result.structured.due_diligence,
+            recommendation=result.structured.recommendation,
+            deal_score=result.structured.deal_score,
+            deal_rating=result.structured.deal_rating,
+        )
     return RAGResponse(
         question=result.question,
         answer=result.answer,
         citations=[
             CitationResponse(
+                kind=c.kind,
+                source_id=c.source_id,
+                title=c.title,
+                excerpt=c.excerpt,
+                score=c.score,
                 document_id=c.document_id,
                 chunk_id=c.chunk_id,
                 page_number=c.page_number,
+                property_id=c.property_id,
                 filename=c.filename,
                 source_name=c.source_name,
-                excerpt=c.excerpt,
-                score=c.score,
             )
             for c in result.citations
         ],
+        structured=structured,
+        context_kinds=result.context_kinds,
+        property_ids=result.property_ids,
+        document_ids=result.document_ids,
         chunks_used=result.chunks_used,
         method=result.method,
         mode=result.mode,
     )
+
+
+@router.post("/rag", response_model=RAGResponse)
+def rag_answer(body: RAGRequest, db: Session = Depends(get_db)):
+    """
+    Multi-source RAG.
+
+    Investment-style questions (or property_id) automatically pull
+    documents + properties + evidence + comparables + valuations + deal signals.
+    """
+    result = answer_question(
+        db,
+        body.question,
+        mode=body.mode,
+        document_id=body.document_id,
+        property_id=body.property_id,
+        limit=body.limit,
+        multi_source=body.multi_source,
+        provider=None,
+    )
+    return _rag_to_response(result)
+
+
+@router.post("/rag/investment", response_model=RAGResponse)
+def rag_investment(body: InvestmentAnalysisRequest, db: Session = Depends(get_db)):
+    """
+    'Is this property a good investment?'
+
+    Anchors retrieval on a property and synthesizes multi-source context.
+    """
+    result = analyze_investment(
+        db,
+        property_id=body.property_id,
+        question=body.question,
+        mode=body.mode,
+        provider=None,
+    )
+    return _rag_to_response(result)
