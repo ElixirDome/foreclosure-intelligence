@@ -96,17 +96,23 @@ class BankNetSourceAdapter(SourceAdapter):
 
         for status in self.auction_statuses:
             for type_id in self.property_type_ids:
-                for page in range(self.max_pages):
+                page = 1
+                total_pages = None
+                while page <= self.max_pages:
+                    if total_pages is not None and page > total_pages:
+                        break
+
                     body: dict[str, Any] = {
                         "auctionStatus": status,
                         "limit": self.limit,
                         "sort": {"type": "closest"},
+                        # BankNet pagination: currentPage in response
+                        "page": page,
+                        "currentPage": page,
                         "search": {
                             "propertyTypeId": type_id,
                             "upcomingWithinDays": horizon,
                         },
-                        "page": page + 1,
-                        "offset": page * self.limit,
                     }
                     if self.city_id is not None:
                         body["search"]["cityId"] = self.city_id
@@ -127,6 +133,10 @@ class BankNetSourceAdapter(SourceAdapter):
                         break
 
                     hits = self._extract_hits(payload)
+                    meta = self._extract_page_meta(payload)
+                    if meta.get("total_pages") is not None:
+                        total_pages = int(meta["total_pages"])
+
                     if not hits:
                         break
 
@@ -143,12 +153,17 @@ class BankNetSourceAdapter(SourceAdapter):
 
                     print(
                         f"BankNet status={status} typeId={type_id} "
-                        f"page={page + 1}: {len(hits)} hits, "
-                        f"{new_on_page} new"
+                        f"page={page}/{total_pages or '?'}: "
+                        f"{len(hits)} hits, {new_on_page} new "
+                        f"(total≈{meta.get('total', '?')})"
                     )
 
+                    # Stop at last page from API metadata
+                    if total_pages is not None and page >= total_pages:
+                        break
                     if len(hits) < self.limit:
                         break
+                    page += 1
 
         print(f"BankNet fetch total unique items: {len(items)}")
         return items
