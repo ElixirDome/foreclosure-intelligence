@@ -42,11 +42,20 @@ def run_pnb_ingestion():
 def run_banknet_ingestion():
     db = SessionLocal()
     try:
-        adapter = BankNetSourceAdapter()
-        # Document-first: retain notices even when lot parse is incomplete
-        result = run_document_ingestion(db=db, adapter=adapter)
-        print("\nAUTOMATIC BANKNET DOCUMENT INGESTION COMPLETE")
-        print(result)
+        adapter = BankNetSourceAdapter(
+            # Nationwide by default; pass city_id=2458 for Chennai-only
+            limit=50,
+            max_pages=3,
+            download_documents=True,
+        )
+        result = run_ingestion(db=db, adapter=adapter, user_id=1)
+        print("\nAUTOMATIC BANKNET INGESTION COMPLETE")
+        print("Found:", result.get("items_found"))
+        print("Extracted:", result.get("items_extracted"))
+        print("Saved:", len(result.get("saved") or []))
+        print("Skipped:", len(result.get("skipped") or []))
+        if result.get("error"):
+            print("ERROR:", result["error"])
     except Exception as exc:
         print("\nAUTOMATIC BANKNET INGESTION FAILED")
         print("ERROR:", exc)

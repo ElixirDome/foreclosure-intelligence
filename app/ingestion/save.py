@@ -87,6 +87,15 @@ def save_ingested_properties(
             if not property_obj.locality and property_data.get("locality"):
                 property_obj.locality = property_data["locality"]
 
+            # Refresh status from portal when provided (sold / live / etc.)
+            new_status = property_data.get("foreclosure_status")
+            if new_status and new_status != property_obj.foreclosure_status:
+                property_obj.foreclosure_status = new_status
+
+            if property_data.get("opening_bid") and not property_obj.opening_bid:
+                property_obj.opening_bid = property_data.get("opening_bid")
+                property_obj.price = property_data.get("opening_bid")
+
             skipped.append({
                 "property_id": property_obj.id,
                 "address": property_obj.address,
@@ -97,13 +106,17 @@ def save_ingested_properties(
             property_obj = Property(
                 user_id=user_id,
                 address=property_data["address"],
+                city=property_data.get("city"),
+                locality=property_data.get("locality"),
                 area_sqft=property_data.get("area_sqft"),
                 opening_bid=property_data.get("opening_bid"),
                 price=property_data.get("opening_bid"),
                 property_type=property_data.get("property_type"),
                 survey_number=property_data.get("survey_number"),
                 auction_date=property_data.get("auction_date"),
-                foreclosure_status="scheduled",
+                foreclosure_status=(
+                    property_data.get("foreclosure_status") or "scheduled"
+                ),
                 property_key=property_key,
             )
 
