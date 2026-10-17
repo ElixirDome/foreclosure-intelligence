@@ -186,6 +186,28 @@ function PropertyDetails() {
     loadValuations();
   }, [id]);
 
+  const history = [...valuations].sort(
+    (a, b) => a.valuation_date.localeCompare(b.valuation_date) || a.id - b.id
+  );
+  const chartWidth = 720;
+  const chartHeight = 250;
+  const chartPadding = { top: 20, right: 24, bottom: 44, left: 78 };
+  const plotWidth = chartWidth - chartPadding.left - chartPadding.right;
+  const plotHeight = chartHeight - chartPadding.top - chartPadding.bottom;
+  const historyValues = history.map((item) => item.estimated_value);
+  const minValue = historyValues.length ? Math.min(...historyValues) : 0;
+  const maxValue = historyValues.length ? Math.max(...historyValues) : 0;
+  const valueRange = maxValue - minValue || Math.max(maxValue * 0.1, 1);
+  const chartPoints = history.map((item, index) => ({
+    ...item,
+    x: chartPadding.left + (
+      history.length === 1 ? plotWidth / 2 : index * plotWidth / (history.length - 1)
+    ),
+    y: chartPadding.top + plotHeight - (
+      (item.estimated_value - minValue) / valueRange
+    ) * plotHeight,
+  }));
+
   if (loading) {
     return <div className="page">Loading property...</div>;
   }
@@ -454,32 +476,90 @@ function PropertyDetails() {
         )}
 
         {!valuationsLoading && valuations.length > 0 && (
-          <div className="analysis-grid">
-            {valuations.map((valuation) => (
-              <div className="analysis-card" key={valuation.id}>
-                <strong>Estimated value</strong>
-                <span>
-                  ₹{valuation.estimated_value.toLocaleString("en-IN")}
-                </span>
-
-                <strong>Method</strong>
-                <span>{valuation.valuation_method}</span>
-
-                <strong>Source</strong>
-                <span>{valuation.source ?? "N/A"}</span>
-
-                <strong>Confidence</strong>
-                <span>
-                  {valuation.confidence !== null
-                    ? `${valuation.confidence * 100}%`
-                    : "N/A"}
-                </span>
-
-                <strong>Date</strong>
-                <span>{valuation.valuation_date}</span>
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="analysis-card" role="img" aria-label="Valuation history line chart">
+              <svg
+                viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                width="100%"
+                style={{ display: "block", maxWidth: "100%" }}
+                aria-hidden="true"
+              >
+                {[0, 0.5, 1].map((fraction) => {
+                  const y = chartPadding.top + plotHeight * fraction;
+                  const value = maxValue - valueRange * fraction;
+                  return (
+                    <g key={fraction}>
+                      <line
+                        x1={chartPadding.left}
+                        y1={y}
+                        x2={chartWidth - chartPadding.right}
+                        y2={y}
+                        stroke="currentColor"
+                        opacity="0.16"
+                      />
+                      <text
+                        x={chartPadding.left - 10}
+                        y={y + 4}
+                        textAnchor="end"
+                        fill="currentColor"
+                        fontSize="11"
+                      >
+                        ₹{Math.round(value).toLocaleString("en-IN")}
+                      </text>
+                    </g>
+                  );
+                })}
+                {chartPoints.length > 1 && (
+                  <polyline
+                    points={chartPoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                )}
+                {chartPoints.map((point) => (
+                  <g key={point.id}>
+                    <circle cx={point.x} cy={point.y} r="5" fill="currentColor">
+                      <title>
+                        {point.valuation_date}: ₹{point.estimated_value.toLocaleString("en-IN")}
+                      </title>
+                    </circle>
+                    <text
+                      x={point.x}
+                      y={chartHeight - 14}
+                      textAnchor="middle"
+                      fill="currentColor"
+                      fontSize="10"
+                    >
+                      {point.valuation_date}
+                    </text>
+                  </g>
+                ))}
+              </svg>
+            </div>
+            <div className="analysis-grid">
+              {history.map((valuation) => (
+                <div className="analysis-card" key={valuation.id}>
+                  <strong>Estimated value</strong>
+                  <span>₹{valuation.estimated_value.toLocaleString("en-IN")}</span>
+                  <strong>Method</strong>
+                  <span>{valuation.valuation_method}</span>
+                  <strong>Source</strong>
+                  <span>{valuation.source ?? "N/A"}</span>
+                  <strong>Confidence</strong>
+                  <span>
+                    {valuation.confidence !== null
+                      ? `${(valuation.confidence * 100).toFixed(0)}%`
+                      : "N/A"}
+                  </span>
+                  <strong>Date</strong>
+                  <span>{valuation.valuation_date}</span>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>
