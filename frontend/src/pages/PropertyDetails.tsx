@@ -197,14 +197,17 @@ function PropertyDetails() {
   const historyValues = history.map((item) => item.estimated_value);
   const minValue = historyValues.length ? Math.min(...historyValues) : 0;
   const maxValue = historyValues.length ? Math.max(...historyValues) : 0;
-  const valueRange = maxValue - minValue || Math.max(maxValue * 0.1, 1);
+  const valueRange = maxValue - minValue || Math.max(Math.abs(maxValue) * 0.1, 1);
+  const chartMinValue = maxValue === minValue ? minValue - valueRange / 2 : minValue;
+  const chartMaxValue = maxValue === minValue ? maxValue + valueRange / 2 : maxValue;
+  const chartValueRange = chartMaxValue - chartMinValue;
   const chartPoints = history.map((item, index) => ({
     ...item,
     x: chartPadding.left + (
       history.length === 1 ? plotWidth / 2 : index * plotWidth / (history.length - 1)
     ),
     y: chartPadding.top + plotHeight - (
-      (item.estimated_value - minValue) / valueRange
+      (item.estimated_value - chartMinValue) / chartValueRange
     ) * plotHeight,
   }));
 
@@ -486,7 +489,7 @@ function PropertyDetails() {
               >
                 {[0, 0.5, 1].map((fraction) => {
                   const y = chartPadding.top + plotHeight * fraction;
-                  const value = maxValue - valueRange * fraction;
+                  const value = chartMaxValue - chartValueRange * fraction;
                   return (
                     <g key={fraction}>
                       <line
