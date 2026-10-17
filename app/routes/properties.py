@@ -269,6 +269,7 @@ def import_properties_from_pdf(
 def create_property_valuation(
     property_id: int,
     valuation: PropertyValuationCreate,
+    property: Property = Depends(require_property_owner),
     db: Session = Depends(get_db),
 ):
     try:
@@ -331,6 +332,7 @@ def get_market_comparables(
 )
 def create_market_comparable(
     comparable: MarketComparableCreate,
+    current_user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     return add_market_comparable(
@@ -352,6 +354,7 @@ def create_market_comparable(
 )
 def calculate_property_market_valuation(
     property_id: int,
+    property: Property = Depends(require_property_owner),
     db: Session = Depends(get_db),
 ):
     property_obj = get_property_by_id(
