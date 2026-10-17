@@ -4,6 +4,8 @@ import api from "../api/client";
 import { analyzeInvestment, getPropertyEvidence, getPropertyDeal } from "../api/rag";
 import type { EvidenceItem, DealIntelligence, RAGResponse } from "../api/types";
 import RagResult from "../components/RagResult";
+import ValuationChart from "../components/ValuationChart";
+import type { DocumentItem } from "../api/types";
 
 function formatINR(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === "") return "N/A";
@@ -86,6 +88,8 @@ function PropertyDetails() {
   const [investmentResult, setInvestmentResult] = useState<RAGResponse | null>(null);
   const [investmentLoading, setInvestmentLoading] = useState(false);
   const [investmentError, setInvestmentError] = useState("");
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(true);
   const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
   const [dealIntel, setDealIntel] = useState<DealIntelligence | null>(null);
 
@@ -101,6 +105,17 @@ function PropertyDetails() {
     getPropertyDeal(Number(id))
       .then(setDealIntel)
       .catch(() => setDealIntel(null));
+  }, [id]);
+
+
+  useEffect(() => {
+    if (!id) return;
+    setDocumentsLoading(true);
+    api
+      .get<DocumentItem[]>(`/properties/${id}/documents`)
+      .then((res) => setDocuments(res.data))
+      .catch(() => setDocuments([]))
+      .finally(() => setDocumentsLoading(false));
   }, [id]);
 
   async function handleInvestmentAnalysis() {
@@ -564,6 +579,76 @@ function PropertyDetails() {
         </div>
       )}
 
+      
+      <div className="analysis-container">
+        <h2>Source documents</h2>
+        {documentsLoading && <p className="muted">Loading documents…</p>}
+        {!documentsLoading && documents.length === 0 && (
+          <p className="muted">
+            No documents linked to this property yet. Import a sale notice or run
+            ingestion to attach PDFs.
+          </p>
+        )}
+        {!documentsLoading && documents.length > 0 && (
+          <ul className="document-list">
+            {documents.map((doc) => {
+              const isPdf =
+                (doc.mime_type && doc.mime_type.includes("pdf")) ||
+                (doc.filename && doc.filename.toLowerCase().endsWith(".pdf")) ||
+                (doc.source_url && doc.source_url.toLowerCase().includes(".pdf"));
+              const fileHref = `${api.defaults.baseURL}/documents/${doc.id}/file`;
+              const pdfHref =
+                isPdf && doc.source_url && doc.source_url.toLowerCase().includes(".pdf")
+                  ? doc.source_url
+                  : isPdf
+                    ? fileHref
+                    : null;
+              return (
+                <li key={doc.id} className="document-row">
+                  <div>
+                    <strong>
+                      {doc.title || doc.filename || doc.document_type}
+                    </strong>
+                    <div className="muted tiny">
+                      {doc.source_name}
+                      {doc.document_type ? ` · ${doc.document_type}` : ""}
+                      {doc.filename ? ` · ${doc.filename}` : ""}
+                    </div>
+                  </div>
+                  <div className="document-actions">
+                    {pdfHref && (
+                      <a
+                        className="doc-btn"
+                        href={pdfHref}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open PDF
+                      </a>
+                    )}
+                    {doc.source_url && (
+                      <a
+                        className="doc-btn secondary"
+                        href={doc.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Source link
+                      </a>
+                    )}
+                    {!pdfHref && !doc.source_url && (
+                      <a className="doc-btn secondary" href={fileHref} target="_blank" rel="noreferrer">
+                        Open
+                      </a>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
       {/* Field-level evidence */}
       <div className="analysis-container">
         <h2>Source evidence</h2>
@@ -592,43 +677,11 @@ function PropertyDetails() {
         )}
       </div>
 
-      {/* Valuation history */}
       <div className="analysis-container">
         <h2>Valuation history</h2>
-
-        {valuationsLoading && <p>Loading valuations...</p>}
-
-        {!valuationsLoading && valuations.length === 0 && (
-          <p>No valuation records available.</p>
-        )}
-
-        {!valuationsLoading && valuations.length > 0 && (
-          <div className="analysis-grid">
-            {valuations.map((valuation) => (
-              <div className="analysis-card" key={valuation.id}>
-                <strong>Estimated value</strong>
-                <span>
-                  {formatINR(valuation.estimated_value)}
-                </span>
-
-                <strong>Method</strong>
-                <span>{valuation.valuation_method}</span>
-
-                <strong>Source</strong>
-                <span>{valuation.source ?? "N/A"}</span>
-
-                <strong>Confidence</strong>
-                <span>
-                  {valuation.confidence != null
-                    ? `${Number(valuation.confidence) * 100}%`
-                    : "N/A"}
-                </span>
-
-                <strong>Date</strong>
-                <span>{valuation.valuation_date}</span>
-              </div>
-            ))}
-          </div>
+        {valuationsLoading && <p>Loading valuations…</p>}
+        {!valuationsLoading && (
+          <ValuationChart valuations={valuations} />
         )}
       </div>
     </div>

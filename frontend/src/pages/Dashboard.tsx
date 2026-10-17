@@ -69,6 +69,9 @@ function Dashboard() {
     total_properties: 0,
     upcoming_auctions: 0,
     properties_with_estimates: 0,
+    residential: 0,
+    commercial: 0,
+    sold: 0,
   });
 
   async function loadProperties() {
@@ -149,29 +152,37 @@ function Dashboard() {
       </nav>
 
       <header className="header">
-        <h1>Foreclosure Intelligence</h1>
-        <p>Find and analyze auction properties.</p>
+        <h1>The desk</h1>
+        <p>Auction inventory with sources, type, and discount at a glance.</p>
       </header>
 
-      {/* Dashboard summary cards */}
       <div className="summary-grid">
         <div className="summary-card">
-          <span>Total properties</span>
-          <h2>{summary.total_properties}</h2>
+          <span>Total</span>
+          <strong>{summary.total_properties}</strong>
         </div>
-
         <div className="summary-card">
-          <span>Upcoming auctions</span>
-          <h2>{summary.upcoming_auctions}</h2>
+          <span>Upcoming</span>
+          <strong>{summary.upcoming_auctions}</strong>
         </div>
-
         <div className="summary-card">
-          <span>Properties with potential discounts</span>
-          <h2>{summary.properties_with_estimates}</h2>
+          <span>Discounted</span>
+          <strong>{summary.properties_with_estimates}</strong>
+        </div>
+        <div className="summary-card">
+          <span>Residential</span>
+          <strong>{summary.residential}</strong>
+        </div>
+        <div className="summary-card">
+          <span>Commercial</span>
+          <strong>{summary.commercial}</strong>
+        </div>
+        <div className="summary-card">
+          <span>Sold</span>
+          <strong>{summary.sold}</strong>
         </div>
       </div>
 
-      <form className="filters" onSubmit={handleSearch}></form>
       <form className="filters" onSubmit={handleSearch}>
         <input
           type="text"
@@ -286,22 +297,32 @@ function Dashboard() {
                   </div>
                   {property.sources && property.sources.length > 0 && (
                     <div>
-                      {property.sources.slice(0, 2).map((src, idx) => (
-                        <span key={idx} className="source-chip">
-                          {src.source_url ? (
-                            <a
-                              href={src.source_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {src.source_name} ↗
-                            </a>
-                          ) : (
-                            src.source_name
-                          )}
-                        </span>
-                      ))}
+                      {property.sources.slice(0, 3).map((src, idx) => {
+                        const isPdf =
+                          (src.filename && src.filename.toLowerCase().endsWith(".pdf")) ||
+                          (src.source_url && src.source_url.toLowerCase().includes(".pdf")) ||
+                          (src.document_type && src.document_type.toLowerCase().includes("notice"));
+                        return (
+                          <span key={idx} className="source-chip">
+                            {src.source_url ? (
+                              <a
+                                href={src.source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {src.source_name}
+                                {isPdf ? " · PDF" : ""} ↗
+                              </a>
+                            ) : (
+                              <>
+                                {src.source_name}
+                                {isPdf ? " · PDF" : ""}
+                              </>
+                            )}
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

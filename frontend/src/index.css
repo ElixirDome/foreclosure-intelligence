@@ -965,3 +965,118 @@ a {
   font-size: 11px;
   color: #1c3a2e;
 }
+
+
+/* Horizontal summary strip */
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 28px;
+  padding: 14px 16px;
+  border: 1px solid #d8d0c3;
+  border-radius: 12px;
+  background: #fffdf8;
+}
+@media (max-width: 900px) {
+  .summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px 6px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.summary-card span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6d665c;
+}
+.summary-card strong,
+.summary-card h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-family: Georgia, serif;
+  font-weight: 600;
+  color: #1c1915;
+}
+
+.document-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid #d8d0c3;
+}
+.document-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 4px;
+  border-bottom: 1px solid #d8d0c3;
+  flex-wrap: wrap;
+}
+.document-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.doc-btn {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #1c3a2e;
+  color: #f3eee4 !important;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.doc-btn.secondary {
+  background: transparent;
+  color: #1c3a2e !important;
+  border: 1px solid #d8d0c3;
+}
+
+.valuation-chart-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.valuation-chart {
+  width: 100%;
+  background: #fffdf8;
+  border: 1px solid #d8d0c3;
+  border-radius: 12px;
+  padding: 8px 4px 4px;
+}
+.valuation-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.valuation-table th,
+.valuation-table td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid #d8d0c3;
+}
+.valuation-table th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6d665c;
+  font-weight: 600;
+}
