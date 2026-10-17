@@ -1,3 +1,5 @@
+from fastapi.responses import FileResponse, RedirectResponse
+from pathlib import Path
 """
 Document, retrieval, extraction, and RAG API routes.
 """
@@ -46,6 +48,26 @@ def get_document(document_id: int, db: Session = Depends(get_db)):
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc
+
+
+
+@router.get("/{document_id}/file")
+def download_document_file(document_id: int, db: Session = Depends(get_db)):
+    """Serve stored PDF when available; otherwise redirect to source URL."""
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.storage_path:
+        path = Path(doc.storage_path)
+        if path.is_file():
+            return FileResponse(
+                path,
+                media_type=doc.mime_type or "application/pdf",
+                filename=doc.filename or path.name,
+            )
+    if doc.source_url:
+        return RedirectResponse(url=doc.source_url, status_code=302)
+    raise HTTPException(status_code=404, detail="No file or source URL")
 
 
 @router.get(

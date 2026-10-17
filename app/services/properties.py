@@ -630,8 +630,30 @@ def get_property_summary(db: Session):
         or 0
     )
 
+    residential = (
+        db.query(func.count(Property.id))
+        .filter(func.lower(Property.property_type) == "residential")
+        .scalar()
+        or 0
+    )
+    commercial = (
+        db.query(func.count(Property.id))
+        .filter(func.lower(Property.property_type) == "commercial")
+        .scalar()
+        or 0
+    )
+    sold = (
+        db.query(func.count(Property.id))
+        .filter(func.lower(Property.foreclosure_status) == "sold")
+        .scalar()
+        or 0
+    )
+
     return {
         "total_properties": total_properties,
         "upcoming_auctions": upcoming_auctions,
         "properties_with_estimates": properties_with_estimates,
+        "residential": residential,
+        "commercial": commercial,
+        "sold": sold,
     }

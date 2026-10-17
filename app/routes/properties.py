@@ -19,8 +19,8 @@ from app.services.properties import (
    
 )
 from app.database import SessionLocal,get_db
-from app.models import Property, User, PropertyValuation
-from app.schemas import PropertyResponse,PropertyListResponse,PropertyCreate,PropertyUpdate,PropertyAnalysis,PropertyAIAnalysis, PropertyValuationCreate, PropertyValuationResponse #didn't import it lost 10 mins
+from app.models import Property, User, PropertyValuation, Document, PropertyDocument
+from app.schemas import PropertyResponse,PropertyListResponse,PropertyCreate,PropertyUpdate,PropertyAnalysis,PropertyAIAnalysis, PropertyValuationCreate, PropertyValuationResponse, DocumentResponse
 from app.security import (get_current_user, require_role,
                           require_property_owner #
                           )
@@ -159,6 +159,26 @@ def analyze_property_ai_route(
         property=property,
         provider=provider,
     )
+
+
+@router.get(
+    "/{property_id}/documents",
+    response_model=list[DocumentResponse],
+)
+def list_property_documents(
+    property_id: int,
+    db: Session = Depends(get_db),
+):
+    """Sale notices and other documents linked to this property."""
+    property_obj = get_property_by_id(property_id=property_id, db=db)
+    return (
+        db.query(Document)
+        .join(PropertyDocument, PropertyDocument.document_id == Document.id)
+        .filter(PropertyDocument.property_id == property_obj.id)
+        .order_by(Document.last_seen_at.desc())
+        .all()
+    )
+
 
 @router.get(
     "/{property_id}",
