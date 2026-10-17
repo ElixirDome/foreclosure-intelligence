@@ -1,4 +1,4 @@
-from pydantic import BaseModel,ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime, date
 from typing import Literal
 #Pydantic is a library for validating and shaping data — specifically, checking that Python objects (usually built from JSON) match a schema you define, and converting/rejecting them accordingly
@@ -140,10 +140,10 @@ class ExtractedProperty(BaseModel):
     seller_name: str | None = None
 
 class PropertyValuationCreate(BaseModel):
-    estimated_value: float
-    valuation_method: str
-    source: str | None = None
-    confidence: float | None = None
+    estimated_value: float = Field(gt=0, allow_inf_nan=False)
+    valuation_method: str = Field(min_length=1, max_length=100)
+    source: str | None = Field(default=None, max_length=500)
+    confidence: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     valuation_date: date | None = None
 
 
