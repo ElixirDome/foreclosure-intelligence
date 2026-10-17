@@ -1,4 +1,5 @@
-from pydantic import BaseModel,ConfigDict
+from math import isfinite
+from pydantic import BaseModel, ConfigDict, field_validator
 from datetime import datetime, date
 from typing import Literal
 #Pydantic is a library for validating and shaping data — specifically, checking that Python objects (usually built from JSON) match a schema you define, and converting/rejecting them accordingly
@@ -72,7 +73,6 @@ class PropertyUpdate(BaseModel):
         "cancelled",
     ] | None = None
     opening_bid: float | None=None
-    estimated_value: float | None=None
     property_type: str | None=None
     survey_number: str | None = None
 class UserCreate(BaseModel):
@@ -154,6 +154,35 @@ class PropertyValuationCreate(BaseModel):
     source: str | None = None
     confidence: float | None = None
     valuation_date: date | None = None
+
+    @field_validator("estimated_value")
+    @classmethod
+    def validate_estimated_value(cls, value: float) -> float:
+        if not isfinite(value) or value <= 0:
+            raise ValueError("estimated_value must be a positive finite number")
+        return value
+
+    @field_validator("valuation_method")
+    @classmethod
+    def validate_valuation_method(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > 100:
+            raise ValueError("valuation_method must contain 1 to 100 characters")
+        return value
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, value: str | None) -> str | None:
+        if value is not None and len(value) > 500:
+            raise ValueError("source must be at most 500 characters")
+        return value
+
+    @field_validator("confidence")
+    @classmethod
+    def validate_confidence(cls, value: float | None) -> float | None:
+        if value is not None and (not isfinite(value) or not 0 <= value <= 1):
+            raise ValueError("confidence must be between 0 and 1")
+        return value
 
 
 class PropertyValuationResponse(BaseModel):
