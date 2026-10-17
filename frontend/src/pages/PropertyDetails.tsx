@@ -178,6 +178,12 @@ function PropertyDetails() {
 
       setMarketValuation(response.data);
 
+      // Refresh the valuation history so the graph includes this new record.
+      const valuationsResponse = await api.get<PropertyValuation[]>(
+        `/properties/${id}/valuations`
+      );
+      setValuations(valuationsResponse.data);
+
       // Refresh property analysis because the new valuation
       // can affect deal score and confidence.
       const analysisResponse = await api.get<PropertyAnalysis>(
