@@ -63,7 +63,6 @@ class PropertyUpdate(BaseModel):
         "cancelled",
     ] | None = None
     opening_bid: float | None=None
-    estimated_value: float | None=None
     property_type: str | None=None
     survey_number: str | None = None
 class UserCreate(BaseModel):
