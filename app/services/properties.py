@@ -50,6 +50,20 @@ def create_property(
     db.commit()
     db.refresh(property)
 
+    # Keep the valuation ledger aligned with an initial estimate.
+    # Later estimate changes must go through record_valuation().
+    if property.estimated_value is not None and float(property.estimated_value) > 0:
+        record_valuation(
+            db=db,
+            property_id=property.id,
+            estimated_value=float(property.estimated_value),
+            valuation_method="initial_property_value",
+            source="property_creation",
+            confidence=None,
+            valuation_date=date.today(),
+        )
+        db.refresh(property)
+
     return property
 
 def save_extracted_properties(
@@ -332,7 +346,6 @@ def update_property(
         "auction_date",
         "foreclosure_status",
         "opening_bid",
-        "estimated_value",
         "property_type",
         "survey_number",
     }
