@@ -1,167 +1,145 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router-dom";
-import { askRag, listDocuments } from "../api/rag";
-import type { DocumentItem, RAGResponse } from "../api/types";
+import { Link, useSearchParams } from "react-router-dom";
+import { analyzeInvestment, askRag } from "../api/rag";
+import type { RAGResponse } from "../api/types";
 import RagResult from "../components/RagResult";
 
-const SUGGESTIONS = [
-  "Is this a good foreclosure investment?",
-  "What is the reserve price?",
-  "What risks should I check before bidding?",
-  "Summarize comparable sales and valuation",
-  "When is the e-auction scheduled?",
+const GENERAL = [
+  "Which residential lots look most discounted?",
+  "What risks should I watch before bidding?",
+  "Summarize upcoming auctions on the desk",
 ];
 
+const ABOUT_PROPERTY = [
+  "Is this a good investment?",
+  "On what basis was this property evaluated?",
+  "What should I check before bidding?",
+];
+
+type Turn =
+  | { role: "user"; text: string }
+  | { role: "assistant"; result: RAGResponse };
+
 export default function Research() {
+  const [params] = useSearchParams();
+  const propertyIdParam = params.get("property_id");
+  const propertyId = propertyIdParam ? Number(propertyIdParam) : null;
+
   const [question, setQuestion] = useState("");
-  const [propertyId, setPropertyId] = useState("");
-  const [documentId, setDocumentId] = useState("");
-  const [mode, setMode] = useState<"hybrid" | "keyword" | "vector">("hybrid");
-  const [multiSource, setMultiSource] = useState<"auto" | "on" | "off">("auto");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState<RAGResponse | null>(null);
-  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [turns, setTurns] = useState<Turn[]>([]);
 
-  useEffect(() => {
-    listDocuments(30)
-      .then(setDocuments)
-      .catch(() => {
-        /* optional */
-      });
-  }, []);
+  const suggestions = propertyId ? ABOUT_PROPERTY : GENERAL;
 
-  async function handleSubmit(e?: FormEvent) {
-    e?.preventDefault();
-    if (!question.trim()) return;
-
+  async function runAsk(text: string) {
+    const q = text.trim();
+    if (!q || loading) return;
+    setQuestion("");
+    setError("");
+    setTurns((t) => [...t, { role: "user", text: q }]);
+    setLoading(true);
     try {
-      setLoading(true);
-      setError("");
-      setResult(null);
+      let data: RAGResponse;
+      const invest =
+        /\b(invest|good buy|evaluat|basis|deal|worth)\b/i.test(q) && propertyId;
 
-      const ms =
-        multiSource === "auto" ? null : multiSource === "on" ? true : false;
-
-      const data = await askRag({
-        question: question.trim(),
-        property_id: propertyId ? Number(propertyId) : null,
-        document_id: documentId ? Number(documentId) : null,
-        mode,
-        multi_source: ms,
-        limit: 8,
-      });
-      setResult(data);
+      if (invest && propertyId) {
+        data = await analyzeInvestment({
+          property_id: propertyId,
+          question: q,
+        });
+      } else {
+        data = await askRag({
+          question: q,
+          property_id: propertyId,
+          multi_source: true,
+          limit: 8,
+        });
+      }
+      setTurns((t) => [...t, { role: "assistant", result: data }]);
     } catch (err) {
       console.error(err);
       setError(
-        "Could not run research query. Is the API running and are you logged in?",
+        "Could not answer that. Check that you are logged in and the API is running.",
       );
     } finally {
       setLoading(false);
     }
   }
 
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    void runAsk(question);
+  }
+
   return (
-    <div className="page">
-      <div className="navbar">
-        <Link to="/dashboard">Properties</Link>
+    <div className="page desk-page">
+      <nav className="navbar">
+        <Link to="/dashboard">Desk</Link>
         <Link to="/research">Research</Link>
         <Link to="/admin/import">Import</Link>
+      </nav>
+
+      <header className="desk-header">
+        <h1>Research</h1>
+        <p className="muted">
+          Ask in plain language. Name a place, or open a property and ask about
+          that lot. There is nothing to configure.
+        </p>
+        {propertyId && (
+          <p className="context-chip">
+            Scoped to property #{propertyId} ·{" "}
+            <Link to={`/properties/${propertyId}`}>Open lot</Link>
+          </p>
+        )}
+      </header>
+
+      <div className="conversation">
+        {turns.length === 0 && (
+          <p className="muted lead">
+            {propertyId
+              ? "Ask whether this lot is worth a closer look, how it was valued, or what to check before bidding."
+              : "Try a desk-wide question, or open a property first for a tighter answer."}
+          </p>
+        )}
+
+        {turns.map((turn, i) =>
+          turn.role === "user" ? (
+            <p key={i} className="user-turn">
+              {turn.text}
+            </p>
+          ) : (
+            <RagResult key={i} result={turn.result} />
+          ),
+        )}
+
+        {loading && <p className="muted">Looking at what is on file…</p>}
+        {error && <p className="error-text">{error}</p>}
       </div>
 
-      <h1>Research desk</h1>
-      <p className="muted">
-        Multi-source RAG: auction documents, properties, evidence, comparables,
-        valuations, and deal signals.
-      </p>
-
-      <form className="research-form" onSubmit={handleSubmit}>
-        <textarea
-          rows={3}
-          placeholder="Ask e.g. Is property 12 a good investment?"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-        />
-
-        <div className="research-controls">
-          <label>
-            Property ID
-            <input
-              type="number"
-              min={1}
-              placeholder="optional"
-              value={propertyId}
-              onChange={(e) => setPropertyId(e.target.value)}
-            />
-          </label>
-
-          <label>
-            Document
-            <select
-              value={documentId}
-              onChange={(e) => setDocumentId(e.target.value)}
-            >
-              <option value="">Any / all</option>
-              {documents.map((d) => (
-                <option key={d.id} value={d.id}>
-                  #{d.id} {d.filename || d.title || d.source_name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Retrieval mode
-            <select
-              value={mode}
-              onChange={(e) =>
-                setMode(e.target.value as "hybrid" | "keyword" | "vector")
-              }
-            >
-              <option value="hybrid">Hybrid</option>
-              <option value="keyword">Keyword</option>
-              <option value="vector">Vector</option>
-            </select>
-          </label>
-
-          <label>
-            Multi-source
-            <select
-              value={multiSource}
-              onChange={(e) =>
-                setMultiSource(e.target.value as "auto" | "on" | "off")
-              }
-            >
-              <option value="auto">Auto (investment questions)</option>
-              <option value="on">Always on</option>
-              <option value="off">Documents only</option>
-            </select>
-          </label>
-        </div>
-
+      {turns.length === 0 && (
         <div className="suggestion-row">
-          {SUGGESTIONS.map((s) => (
-            <button
-              type="button"
-              key={s}
-              className="chip"
-              onClick={() => setQuestion(s)}
-            >
+          {suggestions.map((s) => (
+            <button key={s} type="button" className="chip" onClick={() => void runAsk(s)}>
               {s}
             </button>
           ))}
         </div>
+      )}
 
+      <form className="ask-bar" onSubmit={handleSubmit}>
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder={propertyId ? "Ask about this lot" : "Ask a question"}
+          aria-label="Question"
+        />
         <button type="submit" disabled={loading || !question.trim()}>
-          {loading ? "Researching…" : "Ask"}
+          Ask
         </button>
       </form>
-
-      {error && <p className="error">{error}</p>}
-
-      {result && <RagResult result={result} />}
     </div>
   );
 }

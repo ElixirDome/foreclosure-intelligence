@@ -1,159 +1,145 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { askRag } from "../api/rag";
+import { analyzeInvestment, askRag } from "../api/rag";
 import type { RAGResponse } from "../api/types";
 import RagResult from "./RagResult";
 
-interface ChatMessage {
-  role: "user" | "assistant";
-  text: string;
-  result?: RAGResponse;
-}
+type Turn =
+  | { role: "user"; text: string }
+  | { role: "assistant"; result: RAGResponse };
 
-const SUGGESTIONS = [
+const ABOUT = [
   "Is this a good investment?",
-  "What is the reserve price?",
-  "What are the main risks?",
-  "Summarize valuation and comparables",
+  "On what basis was this evaluated?",
+  "What should I check before bidding?",
 ];
 
-function propertyIdFromPath(pathname: string): number | null {
-  const m = pathname.match(/^\/properties\/(\d+)/);
-  return m ? Number(m[1]) : null;
-}
+const GENERAL = [
+  "Which residential lots look discounted?",
+  "What risks matter most before bidding?",
+];
 
 export default function ChatBot() {
-  const [open, setOpen] = useState(false);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: "assistant",
-      text: "Ask about a property, auction notice, risks, or whether a deal is worth bidding on. I’ll use documents, comps, and valuations when available.",
-    },
-  ]);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
-  const propertyIdFromRoute = propertyIdFromPath(location.pathname);
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [turns, setTurns] = useState<Turn[]>([]);
 
-  useEffect(() => {
-    if (open) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages, open]);
+  const propertyId = useMemo(() => {
+    const m = location.pathname.match(/^\/properties\/(\d+)/);
+    return m ? Number(m[1]) : null;
+  }, [location.pathname]);
 
-  async function send(question: string) {
-    const q = question.trim();
+  // Hide on login
+  if (location.pathname === "/login") return null;
+
+  const suggestions = propertyId ? ABOUT : GENERAL;
+
+  async function send(text: string) {
+    const q = text.trim();
     if (!q || loading) return;
-
-    setMessages((m) => [...m, { role: "user", text: q }]);
-    setInput("");
+    setDraft("");
+    setError("");
+    setTurns((t) => [...t, { role: "user", text: q }]);
     setLoading(true);
-
     try {
-      const result = await askRag({
-        question: q,
-        property_id: propertyIdFromRoute,
-        multi_source: true,
-        mode: "hybrid",
-        limit: 8,
-      });
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          text: result.structured?.summary || result.answer.slice(0, 280),
-          result,
-        },
-      ]);
+      let data: RAGResponse;
+      const invest =
+        propertyId != null &&
+        /\b(invest|good|evaluat|basis|deal|worth)\b/i.test(q);
+
+      if (invest && propertyId != null) {
+        data = await analyzeInvestment({ property_id: propertyId, question: q });
+      } else {
+        data = await askRag({
+          question: q,
+          property_id: propertyId,
+          multi_source: true,
+          limit: 6,
+        });
+      }
+      setTurns((t) => [...t, { role: "assistant", result: data }]);
     } catch (err) {
       console.error(err);
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          text: "Sorry — I couldn’t reach the research API. Is the backend running?",
-        },
-      ]);
+      setError("Could not answer. Are you logged in?");
     } finally {
       setLoading(false);
     }
   }
 
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    void send(input);
-  }
-
   return (
     <div className="chatbot-root">
       {open && (
-        <div className="chatbot-panel" role="dialog" aria-label="Research chat">
+        <div className="chatbot-panel" role="dialog" aria-label="Research">
           <div className="chatbot-header">
             <div>
-              <strong>Research assistant</strong>
-              <div className="muted chatbot-sub">
-                Multi-source RAG
-                {propertyIdFromRoute
-                  ? ` · property #${propertyIdFromRoute}`
-                  : " · all sources"}
-              </div>
+              <strong>Research</strong>
+              <p className="chatbot-sub muted">
+                {propertyId
+                  ? `Property #${propertyId}`
+                  : "Whole desk"}
+              </p>
             </div>
             <button
               type="button"
               className="chatbot-icon-btn"
+              aria-label="Close"
               onClick={() => setOpen(false)}
-              aria-label="Close chat"
             >
               ×
             </button>
           </div>
 
           <div className="chatbot-messages">
-            {messages.map((msg, i) => (
-              <div
-                key={i}
-                className={
-                  msg.role === "user" ? "chat-bubble user" : "chat-bubble bot"
-                }
-              >
-                <p>{msg.text}</p>
-                {msg.result && (
-                  <div className="chat-rag-embed">
-                    <RagResult result={msg.result} />
-                  </div>
-                )}
-              </div>
-            ))}
-            {loading && (
-              <div className="chat-bubble bot muted">Researching…</div>
+            {turns.length === 0 && (
+              <p className="muted">
+                {propertyId
+                  ? "Ask about this lot in plain language."
+                  : "Ask about the desk, or open a property for a tighter note."}
+              </p>
             )}
-            <div ref={bottomRef} />
+            {turns.map((turn, i) =>
+              turn.role === "user" ? (
+                <div key={i} className="chat-bubble user">
+                  <p>{turn.text}</p>
+                </div>
+              ) : (
+                <div key={i} className="chat-bubble bot">
+                  <RagResult result={turn.result} compact />
+                </div>
+              ),
+            )}
+            {loading && <p className="muted">Looking at what is on file…</p>}
+            {error && <p className="error-text">{error}</p>}
           </div>
 
-          <div className="chatbot-suggestions">
-            {SUGGESTIONS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                className="chip"
-                disabled={loading}
-                onClick={() => void send(s)}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+          {turns.length === 0 && (
+            <div className="chatbot-suggestions">
+              {suggestions.map((s) => (
+                <button key={s} type="button" className="chip" onClick={() => void send(s)}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
 
-          <form className="chatbot-input-row" onSubmit={onSubmit}>
+          <form
+            className="chatbot-input-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void send(draft);
+            }}
+          >
             <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about investments, notices, risks…"
-              disabled={loading}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Ask a question"
+              aria-label="Question"
             />
-            <button type="submit" disabled={loading || !input.trim()}>
-              Send
+            <button type="submit" disabled={loading || !draft.trim()}>
+              Ask
             </button>
           </form>
         </div>
@@ -162,10 +148,10 @@ export default function ChatBot() {
       <button
         type="button"
         className="chatbot-fab"
+        aria-label={open ? "Close research" : "Open research"}
         onClick={() => setOpen((v) => !v)}
-        aria-label={open ? "Close research chat" : "Open research chat"}
       >
-        {open ? "×" : "AI"}
+        {open ? "×" : "?"}
       </button>
     </div>
   );

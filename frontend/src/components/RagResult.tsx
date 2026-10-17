@@ -1,145 +1,141 @@
+import { useState } from "react";
 import type { RAGResponse } from "../api/types";
 
-interface Props {
+type Props = {
   result: RAGResponse;
+  compact?: boolean;
+};
+
+function kindLabel(kind?: string | null) {
+  if (!kind) return "Source";
+  const k = kind.toLowerCase();
+  if (k.includes("evidence")) return "Evidence";
+  if (k.includes("compar")) return "Comparable";
+  if (k.includes("valu")) return "Valuation";
+  if (k.includes("deal")) return "Deal signal";
+  if (k.includes("propert")) return "Property";
+  return "Document";
 }
 
-function kindClass(kind: string): string {
-  switch (kind) {
-    case "document":
-      return "badge badge-doc";
-    case "property":
-      return "badge badge-prop";
-    case "comparable":
-      return "badge badge-comp";
-    case "valuation":
-      return "badge badge-val";
-    case "deal":
-      return "badge badge-deal";
-    case "evidence":
-      return "badge badge-ev";
-    default:
-      return "badge";
-  }
-}
-
-export default function RagResult({ result }: Props) {
-  if (!result) {
-    return null;
-  }
-
-  const structured = result.structured ?? null;
+export default function RagResult({ result, compact = false }: Props) {
+  const [showEvidence, setShowEvidence] = useState(false);
+  const structured = result.structured;
+  const citations = result.citations ?? [];
   const strengths = structured?.strengths ?? [];
   const risks = structured?.risks ?? [];
   const diligence = structured?.due_diligence ?? [];
-  const citations = result.citations ?? [];
+  const rating = structured?.deal_rating;
+  const score = structured?.deal_score;
+
+  const verdict =
+    rating ||
+    (score != null && score >= 70
+      ? "Worth a closer look"
+      : score != null && score >= 45
+        ? "Mixed"
+        : score != null
+          ? "Cautious"
+          : null);
 
   return (
-    <div className="rag-result">
-      <div className="rag-meta">
-        <span className="badge">{result.method ?? "rag"}</span>
-        <span className="muted">
-          {result.context_kinds?.length
-            ? result.context_kinds.join(" · ")
-            : "no sources"}
-        </span>
-        <span className="muted">{result.chunks_used ?? 0} doc chunks</span>
-      </div>
+    <article className={`brief-result ${compact ? "brief-compact" : ""}`}>
+      {verdict && (
+        <p className="brief-verdict">{verdict}</p>
+      )}
 
-      {structured && (
-        <div className="structured-panel">
-          {structured.summary && (
-            <p className="structured-summary">{structured.summary}</p>
+      {structured?.summary && (
+        <p className="brief-summary">{structured.summary}</p>
+      )}
+
+      {!structured?.summary && result.answer && (
+        <p className="brief-summary">{result.answer}</p>
+      )}
+
+      {(strengths.length > 0 || risks.length > 0) && (
+        <div className="brief-two-col">
+          {strengths.length > 0 && (
+            <section>
+              <h4>What supports it</h4>
+              <ul>
+                {strengths.map((s) => (
+                  <li key={s}>{s}</li>
+                ))}
+              </ul>
+            </section>
           )}
-
-          {structured.deal_score != null && (
-            <p className="deal-score-line">
-              Deal score:{" "}
-              <strong>{Number(structured.deal_score).toFixed(0)}/100</strong>
-              {structured.deal_rating ? ` (${structured.deal_rating})` : ""}
-            </p>
-          )}
-
-          <div className="structured-columns">
-            {strengths.length > 0 && (
-              <div>
-                <h4>Strengths</h4>
-                <ul>
-                  {strengths.map((s) => (
-                    <li key={s} className="pos">
-                      + {s}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {risks.length > 0 && (
-              <div>
-                <h4>Risks</h4>
-                <ul>
-                  {risks.map((r) => (
-                    <li key={r} className="neg">
-                      − {r}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {diligence.length > 0 && (
-              <div>
-                <h4>Due diligence</h4>
-                <ul>
-                  {diligence.map((d) => (
-                    <li key={d}>· {d}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-
-          {structured.recommendation && (
-            <div className="recommendation">
-              <strong>Recommendation</strong>
-              <p>{structured.recommendation}</p>
-            </div>
+          {risks.length > 0 && (
+            <section>
+              <h4>What can go wrong</h4>
+              <ul>
+                {risks.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            </section>
           )}
         </div>
       )}
 
-      <div className="answer-block">
-        <h4>Answer</h4>
-        <pre className="answer-text">{result.answer ?? ""}</pre>
-      </div>
+      {diligence.length > 0 && (
+        <section className="brief-section">
+          <h4>Before you bid</h4>
+          <ol>
+            {diligence.map((d) => (
+              <li key={d}>{d}</li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {structured?.recommendation && (
+        <section className="brief-section">
+          <h4>Bottom line</h4>
+          <p>{structured.recommendation}</p>
+        </section>
+      )}
+
+      {structured?.summary && result.answer && result.answer !== structured.summary && (
+        <details className="brief-details">
+          <summary>Full answer</summary>
+          <p className="brief-summary">{result.answer}</p>
+        </details>
+      )}
 
       {citations.length > 0 && (
-        <div className="citations">
-          <h4>Citations / evidence</h4>
-          <div className="citation-list">
-            {citations.map((c, idx) => (
-              <div className="citation-card" key={`${c.source_id ?? "c"}-${idx}`}>
-                <div className="citation-head">
-                  <span className={kindClass(c.kind || "document")}>
-                    {c.kind || "document"}
+        <div className="brief-evidence-wrap">
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => setShowEvidence((v) => !v)}
+            aria-expanded={showEvidence}
+          >
+            {showEvidence ? "Hide evidence" : "View evidence"}
+          </button>
+          {showEvidence && (
+            <ul className="brief-evidence-list">
+              {citations.map((c, idx) => (
+                <li key={`${c.source_id ?? "c"}-${idx}`}>
+                  <span className="evidence-kind">{kindLabel(c.kind)}</span>
+                  <strong>{c.title || c.source_name || "Source"}</strong>
+                  {c.excerpt && <p>{c.excerpt}</p>}
+                  <span className="muted tiny">
+                    {[c.source_name, c.page_number != null ? `p.${c.page_number}` : null]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </span>
-                  <span className="citation-title">
-                    {c.title || c.source_id || `source ${idx + 1}`}
-                  </span>
-                  <span className="muted">
-                    score{" "}
-                    {typeof c.score === "number"
-                      ? c.score.toFixed(2)
-                      : String(c.score ?? "")}
-                    {c.page_number != null ? ` · p.${c.page_number}` : ""}
-                  </span>
-                </div>
-                {c.excerpt && (
-                  <p className="citation-excerpt">{c.excerpt}</p>
-                )}
-              </div>
-            ))}
-          </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
-    </div>
+
+      {citations.length === 0 && !result.answer && !structured && (
+        <p className="muted">
+          No supporting material was found for this question. Try naming a
+          city, bank, or opening a property first.
+        </p>
+      )}
+    </article>
   );
 }

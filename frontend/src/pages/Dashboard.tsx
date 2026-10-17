@@ -13,6 +13,8 @@ interface PropertySource {
 interface Property {
   id: number;
   address: string;
+  city?: string | null;
+  locality?: string | null;
   price: number | null;
   bedrooms: number | null;
   bathrooms: number | null;
@@ -259,112 +261,63 @@ function Dashboard() {
             <p>Page {page} of {Math.max(pages, 1)}</p>
           </div>
 
-          <div className="property-grid">
+          <div className="property-list">
             {properties.map((property) => (
               <Link
                 to={`/properties/${property.id}`}
-                className="property-card"
+                className="property-row"
                 key={property.id}
               >
-                <div className="card-top">
-                  <span className={`status status-${property.foreclosure_status ?? "unknown"}`}>
-                    {property.foreclosure_status ?? "Unknown"}
-                  </span>
-
-                  {property.deal_score !== null && (
-                    <span className="score">
-                      Deal score {property.deal_score.toFixed(0)}
+                <div className="property-row-main">
+                  <h3>{property.address}</h3>
+                  <div className="property-row-meta">
+                    <span className="type-badge">
+                      {property.property_type ?? "type n/a"}
                     </span>
-                  )}
-                </div>
-
-                <h2 className="property-address">
-                  {property.address}
-                </h2>
-
-                <div className="property-price">
-                  ₹{property.price?.toLocaleString("en-IN") ?? "N/A"}
-                </div>
-
-                <div className="property-meta">
-                  <span>
+                    {property.locality || property.city
+                      ? `${property.locality ?? ""}${property.locality && property.city ? ", " : ""}${property.city ?? ""}`
+                      : null}
                     {property.area_sqft
-                      ? `${property.area_sqft.toLocaleString()} sq ft`
-                      : "Area N/A"}
-                  </span>
-
-                  <span
-                    className={
-                      property.property_type === "commercial"
-                        ? "type-badge commercial"
-                        : property.property_type === "residential"
-                          ? "type-badge residential"
-                          : "type-badge"
-                    }
-                  >
-                    {property.property_type
-                      ? property.property_type.charAt(0).toUpperCase() +
-                        property.property_type.slice(1)
-                      : "Type N/A"}
-                  </span>
-
-                  {property.bedrooms !== null && (
-                    <span>{property.bedrooms} bed</span>
-                  )}
-                </div>
-
-                {property.sources && property.sources.length > 0 && (
-                  <div className="source-row">
-                    {property.sources.slice(0, 2).map((src, idx) => (
-                      <a
-                        key={idx}
-                        className="source-chip"
-                        href={src.source_url || undefined}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {src.source_name}
-                        {src.source_url ? " ↗" : ""}
-                      </a>
-                    ))}
+                      ? ` · ${property.area_sqft.toLocaleString()} sq ft`
+                      : ""}
+                    {property.auction_date
+                      ? ` · auction ${property.auction_date}`
+                      : ""}
                   </div>
-                )}
-
-                <div className="deal-details">
-                  {property.estimated_value !== null && (
+                  {property.sources && property.sources.length > 0 && (
                     <div>
-                      <span>Estimated value</span>
-                      <strong>
-                        ₹{property.estimated_value.toLocaleString("en-IN")}
-                      </strong>
-                    </div>
-                  )}
-
-                  {property.discount_percentage !== null && (
-                    <div>
-                      <span>Discount</span>
-                      <strong>
-                        {property.discount_percentage.toFixed(1)}%
-                      </strong>
+                      {property.sources.slice(0, 2).map((src, idx) => (
+                        <span key={idx} className="source-chip">
+                          {src.source_url ? (
+                            <a
+                              href={src.source_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {src.source_name} ↗
+                            </a>
+                          ) : (
+                            src.source_name
+                          )}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>
-
-                {property.survey_number && (
-                  <div className="survey">
-                    Survey No. {property.survey_number}
+                <div className="property-row-side">
+                  <div className="price">
+                    ₹{property.price?.toLocaleString("en-IN") ?? "N/A"}
                   </div>
-                )}
-
-                {property.auction_date && (
-                  <div className="auction">
-                    Auction: {property.auction_date}
+                  <div className="muted">
+                    {property.foreclosure_status ?? "unknown"}
+                    {property.discount_percentage != null
+                      ? ` · ${property.discount_percentage.toFixed(0)}% under est.`
+                      : ""}
                   </div>
-                )}
-
-                <div className="card-footer">
-                  View property →
+                  {property.deal_score != null && (
+                    <div className="muted">Deal {property.deal_score.toFixed(0)}</div>
+                  )}
                 </div>
               </Link>
             ))}

@@ -4,9 +4,16 @@
 
 body {
   margin: 0;
-  font-family: Arial, Helvetica, sans-serif;
-  background: #f5f6f8;
-  color: #111827;
+  font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  background: #f3eee4;
+  color: #1c1915;
+  line-height: 1.5;
+}
+
+h1, h2, h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 560;
+  letter-spacing: -0.02em;
 }
 
 a {
@@ -684,4 +691,277 @@ a {
 .chatbot-input-row button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+
+/* —— Auction Brief / research conversation —— */
+.desk-page {
+  max-width: 880px;
+}
+.desk-header h1 {
+  margin-bottom: 6px;
+}
+.lead {
+  max-width: 36rem;
+}
+.conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin: 1.5rem 0;
+}
+.user-turn {
+  font-weight: 600;
+  margin: 0;
+}
+.context-chip {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #6d665c;
+}
+.suggestion-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.chip {
+  border: 1px solid #d8d0c3;
+  background: #f3eee4;
+  color: #1c1915;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.chip:hover {
+  background: #e8e1d4;
+}
+.ask-bar {
+  display: flex;
+  gap: 10px;
+  border-top: 1px solid #d8d0c3;
+  padding-top: 12px;
+  margin-top: 8px;
+}
+.ask-bar input {
+  flex: 1;
+  min-height: 44px;
+  border: none;
+  border-bottom: 1px solid #d8d0c3;
+  background: transparent;
+  font: inherit;
+  outline: none;
+}
+.ask-bar button {
+  min-height: 44px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 8px;
+  background: #1c3a2e;
+  color: #f3eee4;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ask-bar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.error-text {
+  color: #8f2d2d;
+}
+.muted.tiny {
+  font-size: 12px;
+}
+
+.brief-result {
+  max-width: 40rem;
+}
+.brief-verdict {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8c6a32;
+}
+.brief-summary {
+  margin: 0 0 12px;
+  font-size: 15px;
+  line-height: 1.55;
+}
+.brief-two-col {
+  display: grid;
+  gap: 1rem;
+  margin: 12px 0;
+}
+@media (min-width: 640px) {
+  .brief-two-col {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.brief-section {
+  margin: 12px 0;
+}
+.brief-section h4,
+.brief-two-col h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #6d665c;
+}
+.brief-section ul,
+.brief-section ol,
+.brief-two-col ul {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+.brief-section li,
+.brief-two-col li {
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+.brief-details {
+  margin: 10px 0;
+  font-size: 14px;
+}
+.link-btn {
+  border: none;
+  background: none;
+  color: #1c3a2e;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.brief-evidence-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid #d8d0c3;
+}
+.brief-evidence-list li {
+  margin-bottom: 12px;
+}
+.brief-evidence-list p {
+  margin: 4px 0;
+  font-size: 13px;
+}
+.evidence-kind {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #8c6a32;
+}
+.brief-compact .brief-summary {
+  font-size: 13px;
+}
+.brief-compact .brief-two-col {
+  grid-template-columns: 1fr;
+}
+
+/* Chatbot forest theme */
+.chatbot-fab {
+  background: #1c3a2e !important;
+  box-shadow: 0 10px 25px rgba(28, 58, 46, 0.28) !important;
+}
+.chatbot-fab:hover {
+  background: #245042 !important;
+}
+.chat-bubble.user {
+  background: #1c3a2e !important;
+}
+.chatbot-input-row button {
+  background: #1c3a2e !important;
+}
+.chatbot-panel {
+  background: #f3eee4 !important;
+  border-color: #d8d0c3 !important;
+}
+.chatbot-header {
+  background: #e8e1d4 !important;
+  border-color: #d8d0c3 !important;
+}
+.chatbot-messages {
+  background: #f3eee4 !important;
+}
+.chat-bubble.bot {
+  background: #fffdf8 !important;
+  border-color: #d8d0c3 !important;
+  max-width: 100%;
+}
+.chatbot-suggestions {
+  background: #f3eee4 !important;
+  border-color: #d8d0c3 !important;
+}
+.chatbot-input-row {
+  background: #f3eee4 !important;
+  border-color: #d8d0c3 !important;
+}
+
+/* Desk list (less card soup) */
+.property-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #d8d0c3;
+}
+.property-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 16px;
+  padding: 16px 4px;
+  border-bottom: 1px solid #d8d0c3;
+  color: inherit;
+  text-decoration: none;
+}
+.property-row:hover {
+  background: #e8e1d4;
+}
+.property-row-main {
+  min-width: 0;
+}
+.property-row-main h3 {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+  font-family: Georgia, serif;
+}
+.property-row-meta {
+  font-size: 13px;
+  color: #6d665c;
+}
+.property-row-side {
+  text-align: right;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.property-row-side .price {
+  font-weight: 700;
+  font-size: 15px;
+  color: #1c1915;
+}
+.type-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+  background: #e8e1d4;
+  color: #1c3a2e;
+}
+.source-chip {
+  display: inline-block;
+  margin-top: 4px;
+  margin-right: 4px;
+  font-size: 11px;
+  color: #1c3a2e;
 }

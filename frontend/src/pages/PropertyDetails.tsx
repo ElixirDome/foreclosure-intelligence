@@ -505,25 +505,29 @@ function PropertyDetails() {
         </div>
       </div>
 
-      {/* Multi-source investment analysis (Phase 11 RAG) */}
       <div className="analysis-container">
         <div className="section-header-row">
-          <h2>Investment analysis (multi-source RAG)</h2>
+          <h2>Is this worth a closer look?</h2>
           <button
             onClick={handleInvestmentAnalysis}
             disabled={investmentLoading}
           >
-            {investmentLoading ? "Analyzing…" : "Run investment analysis"}
+            {investmentLoading ? "Looking at the file…" : "Write investment note"}
           </button>
         </div>
         <p className="muted">
-          Pulls auction documents, this property, evidence, comparables,
-          valuations, and deal signals into one cited answer.
+          Uses the notice, evidence, comparables, and valuations already stored
+          for this lot. Supporting excerpts stay under View evidence.
+          {" "}
+          <Link to={`/research?property_id=${id}`}>Open in Research →</Link>
         </p>
         {investmentError && <p className="error">{investmentError}</p>}
         {investmentResult && <RagResult result={investmentResult} />}
         {!investmentResult && !investmentLoading && (
-          <p className="muted">Click the button to generate a structured recommendation.</p>
+          <p className="muted">
+            Generate a short note, or use the corner research chat with the same
+            questions.
+          </p>
         )}
       </div>
 
