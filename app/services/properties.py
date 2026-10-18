@@ -335,6 +335,20 @@ def get_properties(
             "auction_date": property.auction_date,
             "foreclosure_status": property.foreclosure_status,
             "opening_bid": property.opening_bid,
+            "reserve_price": (
+                float(property.reserve_price)
+                if getattr(property, "reserve_price", None) is not None
+                else (
+                    float(property.opening_bid)
+                    if property.opening_bid is not None
+                    else None
+                )
+            ),
+            "emd": (
+                float(property.emd)
+                if getattr(property, "emd", None) is not None
+                else None
+            ),
             "estimated_value": property.estimated_value,
             "property_type": property.property_type,
             "survey_number": property.survey_number,

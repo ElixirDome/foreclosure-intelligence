@@ -57,31 +57,31 @@ def build_deal_intelligence(
     if prop is None:
         return None
 
-    opening_bid = (
-        float(prop.opening_bid)
-        if prop.opening_bid is not None
-        else None
+    reserve = (
+        float(prop.reserve_price)
+        if getattr(prop, "reserve_price", None) is not None
+        else (
+            float(prop.opening_bid)
+            if prop.opening_bid is not None
+            else None
+        )
     )
-    estimated = (
-        float(prop.estimated_value)
-        if prop.estimated_value is not None
-        else None
-    )
-
-    # Latest valuation confidence if present
-    valuation = (
-        db.query(PropertyValuation)
-        .filter(PropertyValuation.property_id == property_id)
-        .order_by(PropertyValuation.id.desc())
-        .first()
-    )
-    confidence = (
-        float(valuation.confidence)
-        if valuation and valuation.confidence is not None
-        else None
-    )
-
     comps = _comparables_for_property(db, prop)
+    comp_prices = [
+        float(c.sale_price)
+        for c in comps
+        if getattr(c, "sale_price", None) is not None
+    ]
+    estimated = None
+    if comp_prices and prop.area_sqft:
+        median = sorted(comp_prices)[len(comp_prices) // 2]
+        # sale_price may already be a total; if it looks like a psf (< 100000) scale by area
+        estimated = median * float(prop.area_sqft) if median < 100_000 else median
+    elif prop.estimated_value is not None:
+        estimated = float(prop.estimated_value)
+
+    confidence = 0.7 if len(comps) >= 3 else (0.4 if comps else None)
+    opening_bid = reserve
     discount_amount, discount_pct = domain.calculate_discount(
         estimated, opening_bid
     )
@@ -99,7 +99,7 @@ def build_deal_intelligence(
         factors.append(
             DealFactor(
                 "+",
-                f"Opening bid is {discount_pct:.1f}% below estimated value",
+                f"Reserve is {discount_pct:.1f}% below the comparable-based estimate",
             )
         )
     elif discount_pct is not None and discount_pct < 5:

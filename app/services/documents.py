@@ -162,6 +162,16 @@ def get_or_create_document(
             .first()
         )
 
+    if document is None and source_url:
+        document = (
+            db.query(Document)
+            .filter(Document.source_url == source_url)
+            .order_by(Document.id.desc())
+            .first()
+        )
+        if document is not None and content_hash and not document.content_hash:
+            document.content_hash = content_hash
+
     if document is not None:
         document.last_seen_at = now
         if extracted_text and not document.extracted_text:

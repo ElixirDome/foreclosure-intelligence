@@ -21,6 +21,8 @@ interface Property {
   area_sqft: number | null;
   auction_date: string | null;
   foreclosure_status: string | null;
+  reserve_price?: number | null;
+  emd?: number | null;
   opening_bid: number | null;
   estimated_value: number | null;
   property_type: string | null;
@@ -328,7 +330,10 @@ function Dashboard() {
                 </div>
                 <div className="property-row-side">
                   <div className="price">
-                    ₹{property.price?.toLocaleString("en-IN") ?? "N/A"}
+                    Reserve ₹{(property.reserve_price ?? property.opening_bid)?.toLocaleString("en-IN") ?? "N/A"}
+                  </div>
+                  <div className="muted">
+                    EMD ₹{property.emd?.toLocaleString("en-IN") ?? "—"}
                   </div>
                   <div className="muted">
                     {property.foreclosure_status ?? "unknown"}

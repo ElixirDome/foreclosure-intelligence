@@ -49,6 +49,7 @@ app.include_router(properties_router)
 app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(intelligence_router)
+app.include_router(sources_router)
 
 
 @app.get("/")

@@ -252,17 +252,22 @@ def _llm_synthesize(
     provider: Any,
 ) -> str:
     context = ctx.as_prompt_blocks()
-    prompt = f"""You are a foreclosure investment analyst.
+    prompt = f"""You are an underwriter reviewing a bank auction property. Be risk-averse.
 
-Answer the investor question using ONLY the multi-source evidence below.
-Sources may include auction documents, property records, field evidence,
-market comparables, valuations, and deal scores.
+Use ONLY the evidence below (notices, property fields, EMD, reserve price, comparables, document chunks).
+Do not invent prices, liens, or legal conclusions.
 
-Rules:
-- Do not invent numbers, legal conclusions, or missing comparables.
-- If evidence is incomplete, say what is missing.
-- Cite sources by their [number].
-- For investment questions, cover opportunity, risks, and due diligence.
+Actively look for red flags in the source text:
+- symbolic vs physical possession
+- junior liens, mortgages, or encumbrances
+- title or occupancy disputes
+- failed prior auctions
+- missing reserve, EMD, or area
+- thin or absent comparables
+
+If a risk is not in the evidence, say it was not found — do not imply it was cleared.
+Answer the question directly: verdict, why, what supports it, what can go wrong, what to verify before bidding.
+Cite sources by their [number].
 
 QUESTION:
 {question}

@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, Numeric, String, Text, ForeignKey, Date, DateTime, JSON
+from sqlalchemy import Boolean, Integer, Numeric, String, Text, ForeignKey, Date, DateTime, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from app.database import Base
 from datetime import date, datetime  
@@ -66,6 +66,16 @@ class Property(Base):
         nullable=True
     )
 
+    reserve_price: Mapped[float | None] = mapped_column(
+        Numeric,
+        nullable=True,
+    )
+
+    emd: Mapped[float | None] = mapped_column(
+        Numeric,
+        nullable=True,
+    )
+
     estimated_value: Mapped[float | None] = mapped_column(
         Numeric,
         nullable=True
@@ -130,6 +140,21 @@ class IngestionRun(Base):
     items_created: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     items_skipped: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class ConnectedSource(Base):
+    """A bank portal or listing site plugged in by an admin."""
+
+    __tablename__ = "connected_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    base_url: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    adapter_key: Mapped[str] = mapped_column(String, nullable=False)
+    config_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_status: Mapped[str | None] = mapped_column(String, nullable=True)
 
 class Document(Base):
     """

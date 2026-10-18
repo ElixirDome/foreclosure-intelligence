@@ -4,7 +4,6 @@ import api from "../api/client";
 import { analyzeInvestment, getPropertyEvidence, getPropertyDeal } from "../api/rag";
 import type { EvidenceItem, DealIntelligence, RAGResponse } from "../api/types";
 import RagResult from "../components/RagResult";
-import ValuationChart from "../components/ValuationChart";
 import type { DocumentItem } from "../api/types";
 
 function formatINR(value: number | string | null | undefined): string {
@@ -467,57 +466,13 @@ function PropertyDetails() {
           </div>
         )}
       </div>
-      {/* Add valuation */}
       <div className="analysis-container">
-        <h2>Add valuation</h2>
-
-        <div className="valuation-form">
-          <input
-            type="number"
-            placeholder="Estimated value"
-            value={valuationValue}
-            onChange={(e) => setValuationValue(e.target.value)}
-          />
-
-          <input
-            type="text"
-            placeholder="Valuation method"
-            value={valuationMethod}
-            onChange={(e) => setValuationMethod(e.target.value)}
-          />
-
-          <input
-            type="text"
-            placeholder="Source"
-            value={valuationSource}
-            onChange={(e) => setValuationSource(e.target.value)}
-          />
-
-          <input
-            type="number"
-            min="0"
-            max="1"
-            step="0.01"
-            placeholder="Confidence (0–1)"
-            value={valuationConfidence}
-            onChange={(e) => setValuationConfidence(e.target.value)}
-          />
-
-          <button
-            onClick={handleAddValuation}
-            disabled={
-              valuationSubmitting ||
-              !valuationValue ||
-              !valuationMethod
-            }
-          >
-            {valuationSubmitting ? "Saving..." : "Add valuation"}
-          </button>
-
-          {valuationError && (
-            <p className="error">{valuationError}</p>
-          )}
-        </div>
+        <h2>Value basis</h2>
+        <p className="muted">
+          Reserve and EMD come from the bank notice. The estimate used in deal
+          analysis is the neighborhood comparable set, not a manually typed
+          valuation.
+        </p>
       </div>
 
       <div className="analysis-container">
@@ -678,11 +633,11 @@ function PropertyDetails() {
       </div>
 
       <div className="analysis-container">
-        <h2>Valuation history</h2>
-        {valuationsLoading && <p>Loading valuations…</p>}
-        {!valuationsLoading && (
-          <ValuationChart valuations={valuations} />
-        )}
+        <h2>Deal analysis</h2>
+        <p className="muted">
+          Reserve, EMD, comparables, and notice excerpts are read together in
+          the investment note above. There is no separate valuation ledger.
+        </p>
       </div>
     </div>
   );

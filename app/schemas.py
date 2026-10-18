@@ -50,6 +50,8 @@ class PropertyResponse(BaseModel):
     auction_date: date | None #It can be date or None, but the field itself is required.
     foreclosure_status: str | None
     opening_bid: float | None
+    reserve_price: float | None = None
+    emd: float | None = None
     estimated_value: float | None
     property_type: str | None
     survey_number: str | None = None
