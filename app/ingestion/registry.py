@@ -1,8 +1,8 @@
 """Pluggable listing-source registry.
 
-Built-in adapters (PNB, BankNet) plus admin-connected sources stored in
-`connected_sources`. A connected source is either a known adapter key or
-`custom_html` with regex extraction rules.
+Built-in adapters (PNB, BankNet) and admin-connected sources share the same
+registry. A connected source configured for a built-in adapter key replaces
+that built-in entry, avoiding a duplicate run of the same adapter.
 """
 
 from __future__ import annotations
@@ -46,13 +46,36 @@ def adapter_for_connected(source: ConnectedSource) -> SourceAdapter:
 
 
 def adapters_to_run(db: Session) -> list[tuple[str, SourceAdapter]]:
-    """Enabled connected sources, or the built-in pair when none are stored."""
+    """Return built-ins plus enabled connected sources without duplicate keys."""
     rows = (
         db.query(ConnectedSource)
         .filter(ConnectedSource.enabled.is_(True))
         .order_by(ConnectedSource.id)
         .all()
     )
-    if not rows:
-        return [(a.__class__.__name__, a) for a in builtin_adapters()]
-    return [(row.name, adapter_for_connected(row)) for row in rows]
+    connected_builtin_keys = {
+        (row.adapter_key or "").lower()
+        for row in rows
+        if (row.adapter_key or "").lower() in BUILTIN_KEYS
+    }
+
+    adapters: list[tuple[str, SourceAdapter]] = []
+    for adapter in builtin_adapters():
+        key = (
+            "pnb"
+            if isinstance(adapter, PNBSourceAdapter)
+            else "banknet"
+            if isinstance(adapter, BankNetSourceAdapter)
+            else None
+        )
+        if key not in connected_builtin_keys:
+            adapters.append((adapter.__class__.__name__, adapter))
+
+    adapters.extend(
+        (
+            f"connected:{row.id}:{row.name}",
+            adapter_for_connected(row),
+        )
+        for row in rows
+    )
+    return adapters

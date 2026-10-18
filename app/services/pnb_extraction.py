@@ -149,10 +149,12 @@ def extract_pnb_property(text: str) -> dict:
     Extract one residential property from a PNB section.
     """
 
+    reserve_price = _parse_price(text)
     return {
         "address": _extract_address(text),
         "area_sqft": _parse_area_sqft(text),
-        "opening_bid": _parse_price(text),
+        "opening_bid": reserve_price,
+        "reserve_price": reserve_price,
         "auction_date": _parse_date(text),
         "property_type": "Residential Property",
         "survey_number": _parse_survey_number(text),

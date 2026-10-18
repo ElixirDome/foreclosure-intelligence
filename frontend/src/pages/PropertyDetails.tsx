@@ -30,6 +30,8 @@ interface Property {
   auction_date: string | null;
   foreclosure_status: string | null;
   opening_bid: number | null;
+  reserve_price: number | null;
+  emd: number | null;
   estimated_value: number | null;
   property_type: string | null;
   survey_number: string | null;
@@ -39,21 +41,13 @@ interface Property {
 interface PropertyAnalysis {
   estimated_value: number | null;
   opening_bid: number | null;
+  reserve_price: number | null;
+  emd: number | null;
   discount_amount: number | null;
   discount_percentage: number | null;
   deal_rating: string | null;
   deal_score: number | null;
   valuation_confidence: number | null;
-}
-
-interface PropertyValuation {
-  id: number;
-  property_id: number;
-  estimated_value: number;
-  valuation_method: string;
-  source: string | null;
-  confidence: number | null;
-  valuation_date: string;
 }
 
 function PropertyDetails() {
@@ -64,16 +58,6 @@ function PropertyDetails() {
   const [loading, setLoading] = useState(true);
   const [analysisLoading, setAnalysisLoading] = useState(true);
   const [error, setError] = useState("");
-
-  const [valuations, setValuations] = useState<PropertyValuation[]>([]);
-  const [valuationsLoading, setValuationsLoading] = useState(true);
-
-  const [valuationValue, setValuationValue] = useState("");
-  const [valuationMethod, setValuationMethod] = useState("");
-  const [valuationSource, setValuationSource] = useState("");
-  const [valuationConfidence, setValuationConfidence] = useState("");
-  const [valuationSubmitting, setValuationSubmitting] = useState(false);
-  const [valuationError, setValuationError] = useState("");
 
   const [marketValuation, setMarketValuation] = useState<{
     estimated_value: number;
@@ -135,37 +119,6 @@ function PropertyDetails() {
     }
   }
 
-  async function handleAddValuation() {
-    try {
-      setValuationSubmitting(true);
-      setValuationError("");
-
-      await api.post(`/properties/${id}/valuations`, {
-        estimated_value: Number(valuationValue),
-        valuation_method: valuationMethod,
-        source: valuationSource || null,
-        confidence: valuationConfidence
-          ? Number(valuationConfidence)
-          : null,
-      });
-
-      const response = await api.get<PropertyValuation[]>(
-        `/properties/${id}/valuations`
-      );
-
-      setValuations(response.data);
-
-      setValuationValue("");
-      setValuationMethod("");
-      setValuationSource("");
-      setValuationConfidence("");
-    } catch (err) {
-      console.error(err);
-      setValuationError("Could not save valuation.");
-    } finally {
-      setValuationSubmitting(false);
-    }
-  }
   async function handleMarketValuation() {
     try {
       setMarketValuationLoading(true);
@@ -182,8 +135,14 @@ function PropertyDetails() {
       const analysisResponse = await api.get<PropertyAnalysis>(
         `/properties/${id}/analysis`
       );
-
       setAnalysis(analysisResponse.data);
+
+      const [propertyResponse, dealResponse] = await Promise.all([
+        api.get<Property>(`/properties/${id}`),
+        getPropertyDeal(Number(id)),
+      ]);
+      setProperty(propertyResponse.data);
+      setDealIntel(dealResponse);
     } catch (err) {
       console.error(err);
       setMarketValuationError(
@@ -233,26 +192,6 @@ function PropertyDetails() {
     }
 
     loadAnalysis();
-  }, [id]);
-
-  useEffect(() => {
-    async function loadValuations() {
-      try {
-        setValuationsLoading(true);
-
-        const response = await api.get<PropertyValuation[]>(
-          `/properties/${id}/valuations`
-        );
-
-        setValuations(response.data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setValuationsLoading(false);
-      }
-    }
-
-    loadValuations();
   }, [id]);
 
   if (loading) {
@@ -372,13 +311,13 @@ function PropertyDetails() {
             </div>
 
             <div className="analysis-card">
-              <strong>Opening bid</strong>
-              <span>
-                ₹
-                {analysis.opening_bid?.toLocaleString(
-                  "en-IN"
-                ) ?? "N/A"}
-              </span>
+              <strong>Reserve price</strong>
+              <span>{analysis.reserve_price != null ? formatINR(analysis.reserve_price) : "N/A"}</span>
+            </div>
+
+            <div className="analysis-card">
+              <strong>EMD</strong>
+              <span>{analysis.emd != null ? formatINR(analysis.emd) : "N/A"}</span>
             </div>
 
             <div className="analysis-card">
@@ -518,6 +457,18 @@ function PropertyDetails() {
               <strong>Comparables</strong>
               <span>{dealIntel.comparable_count}</span>
             </div>
+            <div className="analysis-card">
+              <strong>Reserve price</strong>
+              <span>{dealIntel.reserve_price != null ? formatINR(dealIntel.reserve_price) : "N/A"}</span>
+            </div>
+            <div className="analysis-card">
+              <strong>EMD</strong>
+              <span>{dealIntel.emd != null ? formatINR(dealIntel.emd) : "N/A"}</span>
+            </div>
+            <div className="analysis-card">
+              <strong>Comparable-based estimate</strong>
+              <span>{dealIntel.estimated_value != null ? formatINR(dealIntel.estimated_value) : "Insufficient evidence"}</span>
+            </div>
           </div>
           {dealIntel.factors?.length > 0 && (
             <ul className="factor-list">
@@ -636,7 +587,8 @@ function PropertyDetails() {
         <h2>Deal analysis</h2>
         <p className="muted">
           Reserve, EMD, comparables, and notice excerpts are read together in
-          the investment note above. There is no separate valuation ledger.
+          the investment note above. Only automated comparable-based estimates
+          are accepted; each recorded estimate retains its method and source.
         </p>
       </div>
     </div>

@@ -7,6 +7,8 @@ from typing import Literal
 
 #This class defines the shape of incoming/outgoing JSON, separate from your database table
 class PropertyCreate(BaseModel):#inheriting from BaseModel means that Pydantic will automatically generate validation logic for this class based on the type hints you provide.
+    model_config = ConfigDict(extra="forbid")
+
     address: str
     city: str | None = None
     locality: str | None = None
@@ -24,7 +26,6 @@ class PropertyCreate(BaseModel):#inheriting from BaseModel means that Pydantic w
         "cancelled",
     ] | None = None  
     opening_bid: float | None = None
-    estimated_value: float | None = None
     property_type: str | None = None
     survey_number: str | None = None
 
@@ -60,6 +61,8 @@ class PropertyResponse(BaseModel):
     sources: list[PropertySourceInfo] = []
 
 class PropertyUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     address: str | None = None
     price: float | None = None
     bedrooms: int | None = None
@@ -74,7 +77,6 @@ class PropertyUpdate(BaseModel):
         "cancelled",
     ] | None = None
     opening_bid: float | None=None
-    estimated_value: float | None=None
     property_type: str | None=None
     survey_number: str | None = None
 class UserCreate(BaseModel):
@@ -105,6 +107,8 @@ class PropertyListResponse(BaseModel):
 class PropertyAnalysis(BaseModel):
     estimated_value: float | None
     opening_bid: float | None
+    reserve_price: float | None
+    emd: float | None
     discount_amount: float | None
     discount_percentage: float | None
     price_per_sqft: float | None
@@ -149,14 +153,6 @@ class ExtractedProperty(BaseModel):
     auction_close: datetime | None = None
 
     seller_name: str | None = None
-
-class PropertyValuationCreate(BaseModel):
-    estimated_value: float
-    valuation_method: str
-    source: str | None = None
-    confidence: float | None = None
-    valuation_date: date | None = None
-
 
 class PropertyValuationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -366,6 +362,8 @@ class DealIntelligenceResponse(BaseModel):
     estimated_value: float | None
     opening_bid: float | None
     comparable_count: int
+    reserve_price: float | None
+    emd: float | None
     factors: list[DealFactorResponse]
     explanation: str
 

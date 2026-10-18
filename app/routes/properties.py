@@ -20,7 +20,7 @@ from app.services.properties import (
 )
 from app.database import SessionLocal,get_db
 from app.models import Property, User, PropertyValuation, Document, PropertyDocument
-from app.schemas import PropertyResponse,PropertyListResponse,PropertyCreate,PropertyUpdate,PropertyAnalysis,PropertyAIAnalysis, PropertyValuationCreate, PropertyValuationResponse, DocumentResponse
+from app.schemas import PropertyResponse,PropertyListResponse,PropertyCreate,PropertyUpdate,PropertyAnalysis,PropertyAIAnalysis, PropertyValuationResponse, DocumentResponse
 from app.security import (get_current_user, require_role,
                           require_property_owner #
                           )
@@ -32,10 +32,10 @@ from app.services.valuation import (
     record_valuation,
     add_market_comparable,
     calculate_market_valuation,
+    get_latest_comparable_valuation,
 )
 
 from app.schemas import (
-    PropertyValuationCreate,
     PropertyValuationResponse,
     MarketComparableCreate,
     MarketComparableResponse,
@@ -127,19 +127,20 @@ def analyze_property_route(
         db=db
     )
 
-    if property.estimated_value is None or property.estimated_value <= 0:
+    analysis = analyze_property(property)
+    if analysis["estimated_value"] is None or analysis["estimated_value"] <= 0:
         raise HTTPException(
             status_code=400,
-            detail="Deal analysis requires estimated_value greater than 0",
+            detail="Deal analysis requires an automated comparable-based valuation",
         )
 
-    if property.opening_bid is None:
+    if analysis["reserve_price"] is None:
         raise HTTPException(
             status_code=400,
-            detail="Deal analysis requires opening_bid",
+            detail="Deal analysis requires reserve_price",
         )
 
-    return analyze_property(property)
+    return analysis
 
 @router.get(
     "/{property_id}/analysis/ai",
@@ -188,10 +189,18 @@ def get_property(
     property_id: int,
     db: Session = Depends(get_db)
 ):
-    return get_property_by_id(
+    property_obj = get_property_by_id(
         property_id=property_id,
-        db=db
+        db=db,
     )
+    response = PropertyResponse.model_validate(property_obj)
+    valuation = get_latest_comparable_valuation(db, property_id)
+    response.estimated_value = (
+        float(valuation.estimated_value)
+        if valuation is not None
+        else None
+    )
+    return response
 
 @router.post(
     "/",
@@ -296,34 +305,6 @@ def import_properties_from_pdf(
     finally:
         temp_path.unlink(missing_ok=True)
 
-@router.post(
-    "/{property_id}/valuations",
-    response_model=PropertyValuationResponse,
-)
-def create_property_valuation(
-    property_id: int,
-    valuation: PropertyValuationCreate,
-    db: Session = Depends(get_db),
-):
-    try:
-        return record_valuation(
-            db=db,
-            property_id=property_id,
-            estimated_value=valuation.estimated_value,
-            valuation_method=valuation.valuation_method,
-            source=valuation.source,
-            confidence=valuation.confidence,
-            valuation_date=valuation.valuation_date,
-        )
-
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=str(exc),
-        )        
-
-# frontend will also need to read valuations.
-# Add this route to app/routes/properties.py:
 @router.get(
     "/{property_id}/valuations",
     response_model=list[PropertyValuationResponse],
@@ -339,8 +320,12 @@ def get_property_valuations(
 
     return (
         db.query(PropertyValuation)
-        .filter(PropertyValuation.property_id == property_obj.id)
-        .order_by(PropertyValuation.valuation_date.desc())
+        .filter(
+            PropertyValuation.property_id == property_obj.id,
+            PropertyValuation.source == "market_comparables",
+            PropertyValuation.valuation_method == "residential_comparable_sales",
+        )
+        .order_by(PropertyValuation.id.desc())
         .all()
     )    
 
@@ -366,6 +351,7 @@ def get_market_comparables(
 def create_market_comparable(
     comparable: MarketComparableCreate,
     db: Session = Depends(get_db),
+    _current_user: User = Depends(require_role("admin")),
 ):
     return add_market_comparable(
         db=db,
@@ -386,12 +372,9 @@ def create_market_comparable(
 )
 def calculate_property_market_valuation(
     property_id: int,
+    property_obj: Property = Depends(require_property_owner),
     db: Session = Depends(get_db),
 ):
-    property_obj = get_property_by_id(
-        property_id=property_id,
-        db=db,
-    )
 
     try:
         valuation_result = calculate_market_valuation(

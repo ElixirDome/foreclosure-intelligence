@@ -31,6 +31,7 @@ export default function ValuationChart({
         new Date(b.valuation_date).getTime(),
     )
     .map((v) => ({
+      id: v.id,
       date: String(v.valuation_date).slice(0, 10),
       value: Number(v.estimated_value),
       method: v.valuation_method,
@@ -88,7 +89,7 @@ export default function ValuationChart({
           })}
           <polyline fill="none" stroke="#1c3a2e" strokeWidth="2.5" points={polyline} />
           {pts.map((p) => (
-            <g key={p.date + p.value}>
+            <g key={p.id}>
               <circle cx={p.x} cy={p.y} r="4.5" fill="#1c3a2e" />
               <text x={p.x} y={h - 12} textAnchor="middle" fontSize="11" fill="#6d665c">
                 {p.date.slice(5)}
@@ -107,8 +108,8 @@ export default function ValuationChart({
           </tr>
         </thead>
         <tbody>
-          {[...data].reverse().map((row, i) => (
-            <tr key={`${row.date}-${i}`}>
+          {[...data].reverse().map((row) => (
+            <tr key={row.id}>
               <td>{row.date}</td>
               <td>{formatINR(row.value)}</td>
               <td>

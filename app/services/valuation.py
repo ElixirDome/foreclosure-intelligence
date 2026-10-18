@@ -13,6 +13,23 @@ MIN_COMPARABLES = 3
 AREA_TOLERANCE = 0.30
 
 
+def get_latest_comparable_valuation(
+    db: Session,
+    property_id: int,
+) -> PropertyValuation | None:
+    """Return only an estimate produced by the automated comparable engine."""
+    return (
+        db.query(PropertyValuation)
+        .filter(
+            PropertyValuation.property_id == property_id,
+            PropertyValuation.source == "market_comparables",
+            PropertyValuation.valuation_method == "residential_comparable_sales",
+        )
+        .order_by(PropertyValuation.id.desc())
+        .first()
+    )
+
+
 def record_valuation(
     db: Session,
     property_id: int,

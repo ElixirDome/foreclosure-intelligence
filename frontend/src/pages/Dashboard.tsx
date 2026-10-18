@@ -233,7 +233,7 @@ function Dashboard() {
 
         <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
           <option value="id">Date added / ID</option>
-          <option value="price">Price</option>
+          <option value="price">Reserve price</option>
           <option value="bedrooms">Bedrooms</option>
           <option value="bathrooms">Bathrooms</option>
           <option value="area_sqft">Area</option>
@@ -330,7 +330,7 @@ function Dashboard() {
                 </div>
                 <div className="property-row-side">
                   <div className="price">
-                    Reserve ₹{(property.reserve_price ?? property.opening_bid)?.toLocaleString("en-IN") ?? "N/A"}
+                    Reserve ₹{property.reserve_price?.toLocaleString("en-IN") ?? "N/A"}
                   </div>
                   <div className="muted">
                     EMD ₹{property.emd?.toLocaleString("en-IN") ?? "—"}

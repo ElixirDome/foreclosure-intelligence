@@ -240,6 +240,7 @@ class BankNetSourceAdapter(SourceAdapter):
             "locality": (source.get("locality") or "").strip() or None,
             "area_sqft": int(area) if area is not None else None,
             "opening_bid": opening_bid,
+            "reserve_price": opening_bid,
             "property_type": prop_type,
             "survey_number": str(unique) if unique else None,
             "auction_date": auction_date,
@@ -323,7 +324,7 @@ class BankNetSourceAdapter(SourceAdapter):
 
         evidence: list[dict] = []
         pairs = [
-            ("opening_bid", source.get("reservePrice"), "reservePrice"),
+            ("reserve_price", source.get("reservePrice"), "reservePrice"),
             ("address", source.get("address"), "address"),
             ("property_type", source.get("propertyType"), "propertyType"),
             ("auction_date", source.get("auctionFrom"), "auctionFrom"),
