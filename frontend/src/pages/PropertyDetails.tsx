@@ -13,13 +13,6 @@ function formatINR(value: number | string | null | undefined): string {
   return `₹${n.toLocaleString("en-IN")}`;
 }
 
-function formatPct(value: number | string | null | undefined): string {
-  if (value === null || value === undefined || value === "") return "N/A";
-  const n = typeof value === "number" ? value : Number(value);
-  if (Number.isNaN(n)) return "N/A";
-  return `${n}%`;
-}
-
 interface Property {
   id: number;
   address: string;

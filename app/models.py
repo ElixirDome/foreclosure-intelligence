@@ -1,4 +1,7 @@
-from sqlalchemy import Boolean, Integer, Numeric, String, Text, ForeignKey, Date, DateTime, JSON
+from sqlalchemy import (
+    Boolean, Integer, Numeric, String, Text, ForeignKey, Date, DateTime, JSON,
+    Index, UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from app.database import Base
 from datetime import date, datetime  
@@ -10,6 +13,11 @@ from datetime import date, datetime
 class Property(Base):
     __tablename__ = "properties"#__tablename__ is you explicitly telling it: "when you generate SQL for this class — SELECT, INSERT, UPDATE, whatever — target the table literally named properties."
     # Concretely, this line is what makes this SQL work when you later call db.query(Property):
+    __table_args__ = (
+        Index("ix_properties_auction_date", "auction_date"),
+        Index("ix_properties_foreclosure_status", "foreclosure_status"),
+        Index("ix_properties_property_type", "property_type"),
+    )
     user_id: Mapped[int] = mapped_column("userid",Integer,ForeignKey("users.id"),nullable=False)
 
     user: Mapped["User"] = relationship(
@@ -209,6 +217,14 @@ class DocumentChunk(Base):
     """
 
     __tablename__ = "document_chunks"
+    __table_args__ = (
+        Index(
+            "ix_document_chunks_document_id_chunk_index",
+            "document_id",
+            "chunk_index",
+            unique=True,
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
@@ -238,6 +254,15 @@ class DocumentChunk(Base):
 
 class PropertyDocument(Base):
     __tablename__ = "property_documents"
+    __table_args__ = (
+        Index("ix_property_documents_property_id", "property_id"),
+        Index("ix_property_documents_document_id", "document_id"),
+        UniqueConstraint(
+            "property_id",
+            "document_id",
+            name="uq_property_document",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
