@@ -10,6 +10,7 @@ from app.routes.auth import router as auth_router
 from app.routes.properties import router as properties_router
 from app.routes.documents import router as documents_router
 from app.routes.intelligence import router as intelligence_router
+from app.routes.sources import router as sources_router
 from app.ingestion.scheduler import start_scheduler, stop_scheduler
 
 
@@ -49,6 +50,7 @@ app.include_router(properties_router)
 app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(intelligence_router)
+app.include_router(sources_router)
 app.include_router(sources_router)
 
 

@@ -110,6 +110,28 @@ def _score_text_match(query: str, text: str) -> float:
 
 
 def _property_blob(prop: Property) -> str:
+    automated_valuations = [
+        valuation
+        for valuation in prop.valuations
+        if valuation.source == "market_comparables"
+        and valuation.valuation_method == "residential_comparable_sales"
+    ]
+    latest_valuation = (
+        max(automated_valuations, key=lambda valuation: valuation.id)
+        if automated_valuations
+        else None
+    )
+    estimated_value = (
+        latest_valuation.estimated_value
+        if latest_valuation is not None
+        else None
+    )
+    valuation_confidence = (
+        latest_valuation.confidence
+        if latest_valuation is not None
+        else None
+    )
+
     parts = [
         f"Property #{prop.id}",
         f"address: {prop.address}",
@@ -118,7 +140,10 @@ def _property_blob(prop: Property) -> str:
         f"type: {prop.property_type}",
         f"area_sqft: {prop.area_sqft}",
         f"opening_bid: {prop.opening_bid}",
-        f"estimated_value: {prop.estimated_value}",
+        f"reserve_price: {prop.reserve_price}",
+        f"emd: {prop.emd}",
+        f"automated_comparable_estimate: {estimated_value}",
+        f"valuation_confidence: {valuation_confidence}",
         f"auction_date: {prop.auction_date}",
         f"foreclosure_status: {prop.foreclosure_status}",
         f"survey_number: {prop.survey_number}",

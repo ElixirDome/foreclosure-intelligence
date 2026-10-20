@@ -80,6 +80,8 @@ export interface DealIntelligence {
   estimated_value: number | null;
   opening_bid: number | null;
   comparable_count: number;
+  reserve_price: number | null;
+  emd: number | null;
   factors: { direction: string; label: string; detail?: string | null }[];
   explanation: string;
 }

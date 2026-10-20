@@ -1,7 +1,8 @@
 """
-Deal intelligence layer (Phase 10).
+Deal intelligence layer.
 
-Composes valuation + domain rules into an explainable deal summary.
+Composes the shared comparable-based valuation engine with explainable
+foreclosure risk rules. It must not maintain a second valuation formula.
 """
 
 from __future__ import annotations
@@ -11,7 +12,11 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 
 from app.domain import deal_analysis as domain
-from app.models import MarketComparable, Property, PropertyValuation
+from app.models import Property
+from app.services.valuation import (
+    calculate_valuation_from_comparables,
+    find_comparables,
+)
 
 
 @dataclass
@@ -33,20 +38,10 @@ class DealIntelligence:
     estimated_value: float | None
     opening_bid: float | None
     comparable_count: int
+    reserve_price: float | None = None
+    emd: float | None = None
     factors: list[DealFactor] = field(default_factory=list)
     explanation: str = ""
-
-
-def _comparables_for_property(
-    db: Session,
-    prop: Property,
-) -> list[MarketComparable]:
-    q = db.query(MarketComparable)
-    if prop.city:
-        q = q.filter(MarketComparable.city == prop.city)
-    if prop.property_type:
-        q = q.filter(MarketComparable.property_type == prop.property_type)
-    return q.limit(50).all()
 
 
 def build_deal_intelligence(
@@ -57,36 +52,52 @@ def build_deal_intelligence(
     if prop is None:
         return None
 
-    reserve = (
+    reserve_price = (
         float(prop.reserve_price)
-        if getattr(prop, "reserve_price", None) is not None
-        else (
-            float(prop.opening_bid)
-            if prop.opening_bid is not None
-            else None
-        )
+        if prop.reserve_price is not None
+        else None
     )
-    comps = _comparables_for_property(db, prop)
-    comp_prices = [
-        float(c.sale_price)
-        for c in comps
-        if getattr(c, "sale_price", None) is not None
-    ]
-    estimated = None
-    if comp_prices and prop.area_sqft:
-        median = sorted(comp_prices)[len(comp_prices) // 2]
-        # sale_price may already be a total; if it looks like a psf (< 100000) scale by area
-        estimated = median * float(prop.area_sqft) if median < 100_000 else median
-    elif prop.estimated_value is not None:
-        estimated = float(prop.estimated_value)
+    opening_bid = (
+        float(prop.opening_bid)
+        if prop.opening_bid is not None
+        else None
+    )
+    emd = float(prop.emd) if prop.emd is not None else None
 
-    confidence = 0.7 if len(comps) >= 3 else (0.4 if comps else None)
-    opening_bid = reserve
+    # Reuse the same eligibility filters and median-per-square-foot
+    # calculation used by the market-valuation endpoint. Never infer a
+    # value by guessing whether sale_price is a unit price or total price.
+    comparables = find_comparables(db=db, property_obj=prop)
+    valuation_result = None
+    if prop.area_sqft and prop.area_sqft > 0 and len(comparables) >= 3:
+        try:
+            valuation_result = calculate_valuation_from_comparables(
+                area_sqft=prop.area_sqft,
+                comparables=comparables,
+            )
+        except ValueError:
+            # Sparse or invalid evidence must result in no estimate, not
+            # a fallback to an arbitrary listing-entered number.
+            valuation_result = None
+
+    estimated = (
+        float(valuation_result["estimated_value"])
+        if valuation_result is not None
+        else None
+    )
+    confidence = (
+        float(valuation_result["confidence"])
+        if valuation_result is not None
+        else None
+    )
+    comparable_count = len(comparables)
+
     discount_amount, discount_pct = domain.calculate_discount(
-        estimated, opening_bid
+        estimated,
+        reserve_price,
     )
     price_psf = domain.calculate_price_per_sqft(
-        opening_bid,
+        reserve_price,
         float(prop.area_sqft) if prop.area_sqft else None,
     )
     risk = domain.get_risk_level(prop.foreclosure_status)
@@ -110,27 +121,32 @@ def build_deal_intelligence(
             )
         )
 
-    if len(comps) >= 3:
+    if valuation_result is not None:
         factors.append(
             DealFactor(
                 "+",
-                f"{len(comps)} market comparables support valuation context",
+                f"{comparable_count} eligible local comparables support the estimate",
             )
         )
-    elif estimated is not None:
+    elif comparable_count:
         factors.append(
             DealFactor(
-                "·",
-                "Estimated value present but few local comparables",
+                "-",
+                f"Only {comparable_count} eligible comparables; at least 3 valid matches are required",
             )
         )
     else:
         factors.append(
-            DealFactor("-", "No estimated market value on file")
+            DealFactor("-", "No eligible local comparables support a market estimate")
         )
 
+    if emd is None:
+        factors.append(DealFactor("-", "EMD was not found in structured auction data"))
+    if reserve_price is None:
+        factors.append(DealFactor("-", "Reserve price was not found in structured auction data"))
+
     if risk <= 1:
-        factors.append(DealFactor("+", "Lower foreclosure process risk"))
+        factors.append(DealFactor("+", "Lower foreclosure process risk based on current status"))
     elif risk >= 3:
         factors.append(
             DealFactor(
@@ -147,11 +163,18 @@ def build_deal_intelligence(
             DealFactor("-", "Auction already concluded or cancelled")
         )
 
-    lines = [f"Deal score: {score:.0f}/100" if score is not None else "Deal score: n/a"]
+    lines = [
+        f"Deal score: {score:.0f}/100" if score is not None else "Deal score: n/a"
+    ]
     if rating:
         lines.append(f"Rating: {rating}")
-    for f in factors:
-        lines.append(f"{f.direction} {f.label}")
+    lines.append(f"Reserve price: {reserve_price if reserve_price is not None else 'not found'}")
+    lines.append(f"EMD: {emd if emd is not None else 'not found'}")
+    lines.append(
+        f"Comparable-based estimate: {estimated if estimated is not None else 'insufficient evidence'}"
+    )
+    for factor in factors:
+        lines.append(f"{factor.direction} {factor.label}")
 
     return DealIntelligence(
         property_id=property_id,
@@ -163,7 +186,9 @@ def build_deal_intelligence(
         risk_level=risk,
         estimated_value=estimated,
         opening_bid=opening_bid,
-        comparable_count=len(comps),
+        comparable_count=comparable_count,
+        reserve_price=reserve_price,
+        emd=emd,
         factors=factors,
         explanation="\n".join(lines),
     )

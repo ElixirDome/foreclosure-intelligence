@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.models import Document, DocumentChunk
 
@@ -163,14 +164,23 @@ def get_or_create_document(
         )
 
     if document is None and source_url:
-        document = (
+        latest_at_url = (
             db.query(Document)
             .filter(Document.source_url == source_url)
             .order_by(Document.id.desc())
             .first()
         )
-        if document is not None and content_hash and not document.content_hash:
-            document.content_hash = content_hash
+        # Reuse a URL match only when its content identity is compatible.
+        # A changed notice at the same URL is a new document version; do not
+        # silently return stale text just because the URL did not change.
+        if latest_at_url is not None and (
+            not content_hash
+            or not latest_at_url.content_hash
+            or latest_at_url.content_hash == content_hash
+        ):
+            document = latest_at_url
+            if content_hash and not document.content_hash:
+                document.content_hash = content_hash
 
     if document is not None:
         document.last_seen_at = now
@@ -201,8 +211,25 @@ def get_or_create_document(
         first_seen_at=now,
         last_seen_at=now,
     )
-    db.add(document)
-    db.flush()
+    try:
+        with db.begin_nested():
+            db.add(document)
+            db.flush()
+    except IntegrityError:
+        # content_hash is unique in the database. If another worker inserted
+        # the same bytes concurrently, reuse its canonical document.
+        if content_hash:
+            duplicate = (
+                db.query(Document)
+                .filter(Document.content_hash == content_hash)
+                .first()
+            )
+            if duplicate is not None:
+                duplicate.last_seen_at = now
+                db.flush()
+                return duplicate, False
+        raise
+
     return document, True
 
 

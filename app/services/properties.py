@@ -2,9 +2,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from math import ceil
 from datetime import date
-from app.models import Property, PropertyDocument, Document
+from app.models import Property, PropertyDocument, Document, PropertyValuation
 
-from sqlalchemy import and_, case, func
+from sqlalchemy import and_, case, func, select
 
 from fastapi import HTTPException
 from app.schemas import PropertyCreate, ExtractedProperty
@@ -145,19 +145,31 @@ def get_properties(
     app.domain.deal_analysis.
     """
 
+    trusted_estimate = (
+        select(PropertyValuation.estimated_value)
+        .where(
+            PropertyValuation.property_id == Property.id,
+            PropertyValuation.source == "market_comparables",
+            PropertyValuation.valuation_method == "residential_comparable_sales",
+        )
+        .order_by(PropertyValuation.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
     discount_percentage = case(
         (
             and_(
-                Property.estimated_value.is_not(None),
-                Property.opening_bid.is_not(None),
-                Property.estimated_value > 0,
+                trusted_estimate.is_not(None),
+                Property.reserve_price.is_not(None),
+                trusted_estimate > 0,
             ),
             (
                 (
-                    Property.estimated_value
-                    - Property.opening_bid
+                    trusted_estimate
+                    - Property.reserve_price
                 )
-                / Property.estimated_value
+                / trusted_estimate
                 * 100
             ),
         ),
@@ -200,6 +212,7 @@ def get_properties(
         Property,
         discount_percentage,
         deal_score,
+        trusted_estimate.label("trusted_estimated_value"),
     )
 
     # Search
@@ -210,10 +223,10 @@ def get_properties(
 
     # Price filters
     if min_price is not None:
-        query = query.filter(Property.price >= min_price)
+        query = query.filter(Property.reserve_price >= min_price)
 
     if max_price is not None:
-        query = query.filter(Property.price <= max_price)
+        query = query.filter(Property.reserve_price <= max_price)
 
     # Property filters
     if bedrooms is not None:
@@ -228,30 +241,30 @@ def get_properties(
     # Discount filters
     if min_discount is not None:
         query = query.filter(
-            Property.estimated_value.is_not(None),
-            Property.opening_bid.is_not(None),
-            Property.estimated_value > 0,
+            trusted_estimate.is_not(None),
+            Property.reserve_price.is_not(None),
+            trusted_estimate > 0,
             (
                 (
-                    Property.estimated_value
-                    - Property.opening_bid
+                    trusted_estimate
+                    - Property.reserve_price
                 )
-                / Property.estimated_value
+                / trusted_estimate
                 * 100
             ) >= min_discount,
         )
 
     if max_discount is not None:
         query = query.filter(
-            Property.estimated_value.is_not(None),
-            Property.opening_bid.is_not(None),
-            Property.estimated_value > 0,
+            trusted_estimate.is_not(None),
+            Property.reserve_price.is_not(None),
+            trusted_estimate > 0,
             (
                 (
-                    Property.estimated_value
-                    - Property.opening_bid
+                    trusted_estimate
+                    - Property.reserve_price
                 )
-                / Property.estimated_value
+                / trusted_estimate
                 * 100
             ) <= max_discount,
         )
@@ -291,7 +304,7 @@ def get_properties(
     # Sorting whitelist
     sort_fields = {
         "id": Property.id,
-        "price": Property.price,
+        "price": Property.reserve_price,
         "bedrooms": Property.bedrooms,
         "bathrooms": Property.bathrooms,
         "area_sqft": Property.area_sqft,
@@ -322,7 +335,7 @@ def get_properties(
 
     properties = []
 
-    for property, discount, score in results:
+    for property, discount, score, trusted_estimated_value in results:
         property_data = {
             "id": property.id,
             "address": property.address,
@@ -337,19 +350,19 @@ def get_properties(
             "opening_bid": property.opening_bid,
             "reserve_price": (
                 float(property.reserve_price)
-                if getattr(property, "reserve_price", None) is not None
-                else (
-                    float(property.opening_bid)
-                    if property.opening_bid is not None
-                    else None
-                )
+                if property.reserve_price is not None
+                else None
             ),
             "emd": (
                 float(property.emd)
                 if getattr(property, "emd", None) is not None
                 else None
             ),
-            "estimated_value": property.estimated_value,
+            "estimated_value": (
+                float(trusted_estimated_value)
+                if trusted_estimated_value is not None
+                else None
+            ),
             "property_type": property.property_type,
             "survey_number": property.survey_number,
             "discount_percentage": (
@@ -428,7 +441,6 @@ def update_property(
         "auction_date",
         "foreclosure_status",
         "opening_bid",
-        "estimated_value",
         "property_type",
         "survey_number",
     }
@@ -485,68 +497,61 @@ def get_property_or_404(# helper function
 
 def analyze_property(property: Property):
     valuation_confidence = None
-
-    # Get confidence from the latest valuation, if one exists
-    if property.valuations:
-        latest_valuation = max(
-            property.valuations,
-            key=lambda valuation: valuation.id,
-        )
-
-        if latest_valuation.confidence is not None:
-            valuation_confidence = float(
-                latest_valuation.confidence
-            )
-
-    estimated_value = (
-        float(property.estimated_value)
-        if property.estimated_value is not None
+    automated_valuations = [
+        valuation
+        for valuation in property.valuations
+        if valuation.source == "market_comparables"
+        and valuation.valuation_method == "residential_comparable_sales"
+    ]
+    latest_valuation = (
+        max(automated_valuations, key=lambda valuation: valuation.id)
+        if automated_valuations
         else None
     )
-
+    if latest_valuation is not None:
+        if latest_valuation.confidence is not None:
+            valuation_confidence = float(latest_valuation.confidence)
+        estimated_value = float(latest_valuation.estimated_value)
+    else:
+        # Do not trust legacy estimates that were typed into property fields.
+        estimated_value = None
     opening_bid = (
         float(property.opening_bid)
         if property.opening_bid is not None
         else None
     )
+    reserve_price = (
+        float(property.reserve_price)
+        if property.reserve_price is not None
+        else None
+    )
+    emd = float(property.emd) if property.emd is not None else None
 
-    # No estimated value yet
-    if estimated_value is None or estimated_value <= 0:
-        return {
-            "estimated_value": estimated_value,
-            "opening_bid": opening_bid,
-            "discount_amount": None,
-            "discount_percentage": None,
-            "price_per_sqft": None,
-            "potential_upside": None,
-            "risk_level": None,
-            "deal_rating": None,
-            "deal_score": None,
-            "valuation_confidence": valuation_confidence,
-        }
+    result = {
+        "estimated_value": estimated_value,
+        "opening_bid": opening_bid,
+        "reserve_price": reserve_price,
+        "emd": emd,
+        "discount_amount": None,
+        "discount_percentage": None,
+        "price_per_sqft": None,
+        "potential_upside": None,
+        "risk_level": None,
+        "deal_rating": None,
+        "deal_score": None,
+        "valuation_confidence": valuation_confidence,
+    }
 
-    # Estimated value exists, but opening bid doesn't
-    if opening_bid is None:
-        return {
-            "estimated_value": estimated_value,
-            "opening_bid": None,
-            "discount_amount": None,
-            "discount_percentage": None,
-            "price_per_sqft": None,
-            "potential_upside": None,
-            "risk_level": None,
-            "deal_rating": None,
-            "deal_score": None,
-            "valuation_confidence": valuation_confidence,
-        }
+    # A lister's opening bid is not a substitute for a published reserve.
+    if estimated_value is None or estimated_value <= 0 or reserve_price is None:
+        return result
 
     discount_amount, discount_percentage = calculate_discount(
         estimated_value,
-        opening_bid,
+        reserve_price,
     )
-
     price_per_sqft = calculate_price_per_sqft(
-        opening_bid,
+        reserve_price,
         property.area_sqft,
     )
 
@@ -555,38 +560,26 @@ def analyze_property(property: Property):
         if property.foreclosure_status
         else None
     )
-
-    risk_level = FORECLOSURE_RISK_LEVELS.get(
-        status,
-        2,
-    )
-
-    base_score = calculate_deal_score(
-        discount_percentage,
-        risk_level,
-    )
-
+    risk_level = FORECLOSURE_RISK_LEVELS.get(status, 2)
+    base_score = calculate_deal_score(discount_percentage, risk_level)
     confidence_adjusted_score = calculate_confidence_adjusted_score(
         base_score,
         valuation_confidence,
     )
+    deal_rating = calculate_deal_rating(discount_percentage)
 
-    deal_rating = calculate_deal_rating(
-        discount_percentage,
+    result.update(
+        {
+            "discount_amount": discount_amount,
+            "discount_percentage": discount_percentage,
+            "price_per_sqft": price_per_sqft,
+            "potential_upside": discount_amount,
+            "risk_level": risk_level,
+            "deal_rating": deal_rating,
+            "deal_score": confidence_adjusted_score,
+        }
     )
-
-    return {
-        "estimated_value": estimated_value,
-        "opening_bid": opening_bid,
-        "discount_amount": discount_amount,
-        "discount_percentage": discount_percentage,
-        "price_per_sqft": price_per_sqft,
-        "potential_upside": discount_amount,
-        "risk_level": risk_level,
-        "deal_rating": deal_rating,
-        "deal_score": confidence_adjusted_score,
-        "valuation_confidence": valuation_confidence,
-    }
+    return result
 
 #It takes those facts and asks the LLM to interpret them.
 def analyze_property_with_ai(
@@ -606,7 +599,9 @@ def analyze_property_with_ai(
         "auction_date": property.auction_date,
         "foreclosure_status": property.foreclosure_status,
         "opening_bid": property.opening_bid,
-        "estimated_value": property.estimated_value,
+        "reserve_price": property.reserve_price,
+        "emd": property.emd,
+        "estimated_value": deterministic_analysis["estimated_value"],
     }
 
     return generate_property_analysis(
@@ -632,13 +627,32 @@ def get_property_summary(db: Session):
         or 0
     )
 
+    latest_valuation_ids = (
+        db.query(
+            PropertyValuation.property_id,
+            func.max(PropertyValuation.id).label("latest_id"),
+        )
+        .filter(
+            PropertyValuation.source == "market_comparables",
+            PropertyValuation.valuation_method == "residential_comparable_sales",
+        )
+        .group_by(PropertyValuation.property_id)
+        .subquery()
+    )
     properties_with_estimates = (
         db.query(func.count(Property.id))
+        .join(
+            latest_valuation_ids,
+            latest_valuation_ids.c.property_id == Property.id,
+        )
+        .join(
+            PropertyValuation,
+            PropertyValuation.id == latest_valuation_ids.c.latest_id,
+        )
         .filter(
-            Property.estimated_value.is_not(None),
-            Property.opening_bid.is_not(None),
-            Property.estimated_value > 0,
-            Property.opening_bid < Property.estimated_value,
+            Property.reserve_price.is_not(None),
+            PropertyValuation.estimated_value > 0,
+            Property.reserve_price < PropertyValuation.estimated_value,
         )
         .scalar()
         or 0

@@ -42,6 +42,8 @@ def property_deal_intelligence(
         estimated_value=result.estimated_value,
         opening_bid=result.opening_bid,
         comparable_count=result.comparable_count,
+        reserve_price=result.reserve_price,
+        emd=result.emd,
         factors=[
             DealFactorResponse(
                 direction=f.direction,
