@@ -5,8 +5,11 @@ on:
     branches:
       - refactor/source-connect-hardening
       - feat/unified-deal-analysis-ui
-      - fix/idempotent-ingestion-unified-analysis
   pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
