@@ -332,9 +332,10 @@ function PropertyDetails() {
         </div>
       </div>
 
-      <div className="deal-analysis-unified">
-        <div className="analysis-container">
+      <div className="deal-analysis-unified analysis-container">
         <h2>Deal Analysis</h2>
+        <section className="analysis-subcard">
+          <h3>Deal intelligence</h3>
 
         {analysisLoading && <p>Calculating analysis...</p>}
 
@@ -398,9 +399,44 @@ function PropertyDetails() {
         {!analysisLoading && !analysis && (
           <p>Analysis unavailable.</p>
         )}
-      </div>
-      <div className="analysis-container">
-        <h2>Market valuation</h2>
+      {dealIntel && (
+        <div className="deal-intel-signals">
+          <h4>Additional signals</h4>
+          <div className="analysis-grid">
+            <div className="analysis-card">
+              <strong>Deal score</strong>
+              <span>{dealIntel.deal_score ?? "N/A"}</span>
+            </div>
+            <div className="analysis-card">
+              <strong>Rating</strong>
+              <span>{dealIntel.deal_rating ?? "N/A"}</span>
+            </div>
+            <div className="analysis-card">
+              <strong>Comparables</strong>
+              <span>{dealIntel.comparable_count}</span>
+            </div>
+          </div>
+          {dealIntel.factors?.length > 0 && (
+            <ul className="factor-list">
+              {dealIntel.factors.map((f, i) => (
+                <li key={i} className={f.direction === "+" ? "pos" : f.direction === "-" ? "neg" : ""}>
+                  {f.direction} {f.label}
+                </li>
+              ))}
+            </ul>
+          )}
+          {dealIntel.explanation && (
+            <pre className="answer-text">{dealIntel.explanation}</pre>
+          )}
+        </div>
+      )}
+
+      
+
+        </section>
+
+      <div className="analysis-subcard">
+        <h3>Market valuation</h3>
 
         <p>
           Estimate the property's market value using the comparable
@@ -445,9 +481,9 @@ function PropertyDetails() {
           </div>
         )}
       </div>
-      <div className="analysis-container">
+      <div className="analysis-subcard">
         <div className="section-header-row">
-          <h2>Is this worth a closer look?</h2>
+          <h3>Is this worth a closer look?</h3>
           <button
             onClick={handleInvestmentAnalysis}
             disabled={investmentLoading}
@@ -471,54 +507,9 @@ function PropertyDetails() {
         )}
       </div>
 
-      {/* Deal intelligence factors */}
-      {dealIntel && (
-        <div className="analysis-container">
-          <h2>Deal intelligence</h2>
-          <div className="analysis-grid">
-            <div className="analysis-card">
-              <strong>Deal score</strong>
-              <span>{dealIntel.deal_score ?? "N/A"}</span>
-            </div>
-            <div className="analysis-card">
-              <strong>Rating</strong>
-              <span>{dealIntel.deal_rating ?? "N/A"}</span>
-            </div>
-            <div className="analysis-card">
-              <strong>Comparables</strong>
-              <span>{dealIntel.comparable_count}</span>
-            </div>
-            <div className="analysis-card">
-              <strong>Reserve price</strong>
-              <span>{dealIntel.reserve_price != null ? formatINR(dealIntel.reserve_price) : "N/A"}</span>
-            </div>
-            <div className="analysis-card">
-              <strong>EMD</strong>
-              <span>{dealIntel.emd != null ? formatINR(dealIntel.emd) : "N/A"}</span>
-            </div>
-            <div className="analysis-card">
-              <strong>Comparable-based estimate</strong>
-              <span>{dealIntel.estimated_value != null ? formatINR(dealIntel.estimated_value) : "Insufficient evidence"}</span>
-            </div>
-          </div>
-          {dealIntel.factors?.length > 0 && (
-            <ul className="factor-list">
-              {dealIntel.factors.map((f, i) => (
-                <li key={i} className={f.direction === "+" ? "pos" : f.direction === "-" ? "neg" : ""}>
-                  {f.direction} {f.label}
-                </li>
-              ))}
-            </ul>
-          )}
-          {dealIntel.explanation && (
-            <pre className="answer-text">{dealIntel.explanation}</pre>
-          )}
-        </div>
-      )}
-
-      
-      <div className="analysis-container">
-        <h2>Source documents</h2>
+      <section className="analysis-subcard">
+        <h3>Source evidence</h3>
+        <h4>Source documents</h4>
         {documentsLoading && <p className="muted">Loading documents…</p>}
         {!documentsLoading && documents.length === 0 && (
           <p className="muted">
@@ -587,8 +578,8 @@ function PropertyDetails() {
       </div>
 
       {/* Field-level evidence */}
-      <div className="analysis-container">
-        <h2>Source evidence</h2>
+      <div className="source-evidence-content">
+        <h4>Extracted facts</h4>
         {evidence.length === 0 && (
           <p className="muted">No field-level evidence linked yet.</p>
         )}
