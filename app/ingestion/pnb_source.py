@@ -1,3 +1,4 @@
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -244,10 +245,21 @@ class PNBSourceAdapter(SourceAdapter):
 
         print("  [1/3] Rendering PDF...")
 
+        configured_poppler = os.getenv("POPPLER_PATH")
+        if not configured_poppler:
+            # Preserve the developer's existing Windows setup when present,
+            # but do not require that machine-specific path elsewhere.
+            default_poppler = Path(
+                r"C:\Dev\poppler-26.09.0\Library\bin"
+            )
+            configured_poppler = (
+                str(default_poppler) if default_poppler.is_dir() else None
+            )
+
         pages = convert_from_path(
             pdf_path,
             dpi=200,
-            poppler_path=r"C:\Dev\poppler-26.09.0\Library\bin",
+            poppler_path=configured_poppler,
         )
 
         print(
