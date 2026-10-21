@@ -575,7 +575,6 @@ function PropertyDetails() {
             })}
           </ul>
         )}
-      </div>
 
       {/* Field-level evidence */}
       <div className="source-evidence-content">
@@ -604,6 +603,7 @@ function PropertyDetails() {
           </div>
         )}
       </div>
+      </section>
       </div>
 
     </div>
