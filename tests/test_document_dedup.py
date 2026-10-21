@@ -248,3 +248,53 @@ def test_pdf_adapter_retains_scanned_pdf_when_no_text_is_extracted(tmp_path, mon
     assert len(items) == 1
     assert items[0]["document_only"] is True
     assert items[0]["pages"] == ["", ""]
+
+
+
+def test_pdf_import_route_uses_pipeline_once_and_keeps_uploaded_file(client, monkeypatch):
+    from pathlib import Path
+
+    captured = {}
+
+    class FakePDFSourceAdapter:
+        def __init__(self, pdf_path):
+            self.pdf_path = Path(pdf_path)
+
+    def fake_run_ingestion(*, db, adapter, user_id):
+        captured["path"] = adapter.pdf_path
+        captured["user_id"] = user_id
+        return {
+            "ingestion_run_id": 987,
+            "saved": [],
+            "skipped": [],
+        }
+
+    monkeypatch.setattr(
+        "app.ingestion.pdf_source.PDFSourceAdapter",
+        FakePDFSourceAdapter,
+    )
+    monkeypatch.setattr(
+        "app.ingestion.pipeline.run_ingestion",
+        fake_run_ingestion,
+    )
+
+    response = client.post(
+        "/properties/import",
+        files={
+            "file": (
+                "test-notice.pdf",
+                b"%PDF-test-upload",
+                "application/pdf",
+            )
+        },
+    )
+
+    try:
+        assert response.status_code == 200
+        assert response.json()["ingestion_run_id"] == 987
+        assert response.json()["saved_count"] == 0
+        assert captured["user_id"] == 1
+        assert captured["path"].is_file()
+        assert captured["path"].read_bytes() == b"%PDF-test-upload"
+    finally:
+        captured["path"].unlink(missing_ok=True)
