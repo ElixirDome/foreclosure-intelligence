@@ -17,7 +17,7 @@ import traceback
 from sqlalchemy.orm import Session
 
 from app.ingestion.base import SourceAdapter
-from app.ingestion.document_ingest import ingest_documents
+from app.ingestion.document_ingest import ingest_document, ingest_documents
 from app.ingestion.save import save_ingested_properties
 from app.models import IngestionRun
 
@@ -112,16 +112,23 @@ def run_ingestion(
         raw_items = adapter.fetch()
 
         extracted_items = []
+        document_only_items = []
 
         for item in raw_items:
             extracted = adapter.extract(item)
+            documents = adapter.get_documents(item) or []
+
+            pages = None
+            if isinstance(item, dict):
+                pages = item.get("pages")
+            pages = pages or getattr(item, "pages", None)
 
             if extracted is None:
-                # Still allow document-only items to be ingested
-                # via run_document_ingestion; skip property path.
+                # Keep source documents even when property extraction fails.
+                document_only_items.extend(
+                    (document, pages) for document in documents
+                )
                 continue
-
-            documents = adapter.get_documents(item)
 
             get_evidence = getattr(
                 adapter,
@@ -134,11 +141,6 @@ def run_ingestion(
                 if get_evidence
                 else []
             )
-
-            pages = None
-            if isinstance(item, dict):
-                pages = item.get("pages")
-            pages = pages or getattr(item, "pages", None)
 
             if isinstance(extracted, list):
                 for property_data in extracted:
@@ -163,6 +165,13 @@ def run_ingestion(
             ingestion_run_id=ingestion_run.id,
         )
 
+        document_only_count = 0
+        for raw_document, pages in document_only_items:
+            ingest_document(db, raw_document, pages=pages)
+            document_only_count += 1
+        if document_only_count:
+            db.commit()
+
         ingestion_run.finished_at = datetime.now(timezone.utc)
         ingestion_run.status = "success"
         ingestion_run.items_found = len(raw_items)
@@ -175,6 +184,7 @@ def run_ingestion(
             "items_extracted": len(extracted_items),
             "saved": save_result["saved"],
             "skipped": save_result["skipped"],
+            "documents_ingested_without_property": document_only_count,
         }
 
     except Exception as exc:
