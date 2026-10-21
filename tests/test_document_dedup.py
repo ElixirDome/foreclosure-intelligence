@@ -202,7 +202,7 @@ def test_pipeline_persists_document_when_property_extraction_fails(client, db):
             return [{"pages": ["A sale notice with no recognized property fields"]}]
 
         def extract(self, item):
-            return None
+            raise RuntimeError("synthetic OCR/parser failure")
 
         def get_documents(self, item):
             return [
@@ -225,5 +225,6 @@ def test_pipeline_persists_document_when_property_extraction_fails(client, db):
     assert "error" not in result
     assert result["items_extracted"] == 0
     assert result["documents_ingested_without_property"] == 1
+    assert result["extraction_errors"] == ["synthetic OCR/parser failure"]
     assert db.query(Document).count() == 1
     assert db.query(DocumentChunk).count() == 1
