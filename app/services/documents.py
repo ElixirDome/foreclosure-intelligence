@@ -323,11 +323,11 @@ def replace_document_chunks(
             Evidence.document_chunk_id.in_(old_chunk_ids)
         ).update(
             {Evidence.document_chunk_id: None},
-            synchronize_session=False,
+            synchronize_session="fetch",
         )
     db.query(DocumentChunk).filter(
         DocumentChunk.document_id == document.id
-    ).delete(synchronize_session=False)
+    ).delete(synchronize_session="fetch")
     db.flush()
     db.expire_all()
 
