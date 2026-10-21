@@ -228,10 +228,6 @@ function PropertyDetails() {
 
         <h1>{property.address}</h1>
 
-        <div className="big-price">
-          ₹{property.price?.toLocaleString("en-IN") ?? "N/A"}
-        </div>
-
         <div className="info-grid">
           <div>
             <strong>Property type</strong>
@@ -258,22 +254,13 @@ function PropertyDetails() {
           </div>
 
           <div>
-            <strong>Opening bid</strong>
-            <span>
-              ₹
-              {property.opening_bid?.toLocaleString("en-IN") ??
-                "N/A"}
-            </span>
+            <strong>Reserve price</strong>
+            <span>{formatINR(property.reserve_price)}</span>
           </div>
 
           <div>
-            <strong>Estimated value</strong>
-            <span>
-              ₹
-              {property.estimated_value?.toLocaleString(
-                "en-IN"
-              ) ?? "N/A"}
-            </span>
+            <strong>EMD</strong>
+            <span>{formatINR(property.emd)}</span>
           </div>
           <div className="analysis-card">
             <strong>Valuation confidence</strong>
@@ -286,8 +273,9 @@ function PropertyDetails() {
         </div>
       </div>
 
-      <div className="analysis-container">
-        <h2>Deal analysis</h2>
+      <div className="deal-analysis-unified">
+        <div className="analysis-container">
+        <h2>Deal Analysis</h2>
 
         {analysisLoading && <p>Calculating analysis...</p>}
 
@@ -398,15 +386,6 @@ function PropertyDetails() {
           </div>
         )}
       </div>
-      <div className="analysis-container">
-        <h2>Value basis</h2>
-        <p className="muted">
-          Reserve and EMD come from the bank notice. The estimate used in deal
-          analysis is the neighborhood comparable set, not a manually typed
-          valuation.
-        </p>
-      </div>
-
       <div className="analysis-container">
         <div className="section-header-row">
           <h2>Is this worth a closer look?</h2>
@@ -575,15 +554,8 @@ function PropertyDetails() {
           </div>
         )}
       </div>
-
-      <div className="analysis-container">
-        <h2>Deal analysis</h2>
-        <p className="muted">
-          Reserve, EMD, comparables, and notice excerpts are read together in
-          the investment note above. Only automated comparable-based estimates
-          are accepted; each recorded estimate retains its method and source.
-        </p>
       </div>
+
     </div>
   );
 }
