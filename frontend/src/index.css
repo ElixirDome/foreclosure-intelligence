@@ -1080,3 +1080,21 @@ a {
   color: #6d665c;
   font-weight: 600;
 }
+
+
+/* Group property financials, valuation, underwriting, and source evidence. */
+.deal-analysis-unified {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.deal-analysis-unified > .analysis-container {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.deal-analysis-unified > .analysis-container + .analysis-container {
+  margin-top: 0;
+}
