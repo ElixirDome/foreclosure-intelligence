@@ -198,8 +198,27 @@ def get_or_create_document(
 
     if document is not None:
         old_hash = document.content_hash
+        hash_owner = None
+        if content_hash and content_hash != old_hash:
+            hash_owner = (
+                db.query(Document)
+                .filter(
+                    Document.content_hash == content_hash,
+                    Document.id != document.id,
+                )
+                .first()
+            )
+
         content_changed = bool(
-            content_hash and content_hash != old_hash
+            content_hash
+            and content_hash != old_hash
+            and (
+                hash_owner is None
+                or (
+                    extracted_text is not None
+                    and extracted_text != document.extracted_text
+                )
+            )
         )
 
         if content_changed:
@@ -211,14 +230,6 @@ def get_or_create_document(
             ).delete(synchronize_session=False)
 
         if content_hash and content_hash != old_hash:
-            hash_owner = (
-                db.query(Document)
-                .filter(
-                    Document.content_hash == content_hash,
-                    Document.id != document.id,
-                )
-                .first()
-            )
             # content_hash is globally unique. If another row already owns
             # this hash, leave this source-identified row unhashed rather than
             # violating the constraint or changing its source identity.
