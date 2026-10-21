@@ -1098,3 +1098,55 @@ a {
 .deal-analysis-unified > .analysis-container + .analysis-container {
   margin-top: 0;
 }
+
+
+/* One parent Deal Analysis card with four visibly nested subcards. */
+.deal-analysis-unified {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.deal-analysis-unified > h2 {
+  margin: 0;
+}
+
+.analysis-subcard {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fcfbf8;
+}
+
+.analysis-subcard h3 {
+  margin: 0 0 16px;
+  font-size: 19px;
+}
+
+.analysis-subcard h4,
+.source-evidence-content h4,
+.deal-intel-signals h4 {
+  margin: 18px 0 10px;
+  font-size: 14px;
+  color: #4b5563;
+}
+
+.deal-intel-signals {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.source-evidence-content {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e5e7eb;
+}
+
+@media (max-width: 700px) {
+  .analysis-subcard {
+    padding: 16px;
+  }
+}
