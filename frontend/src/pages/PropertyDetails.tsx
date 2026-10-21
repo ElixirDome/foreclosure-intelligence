@@ -32,7 +32,7 @@ function deduplicateDocuments(items: DocumentItem[]): DocumentItem[] {
       sourceUrl,
       item.source_name,
       item.document_type,
-      item.title || item.filename || "",
+      item.title || "",
     ].join("\u001f");
 
     if (seen.has(key)) return false;
