@@ -5,7 +5,7 @@ Depends, status, HTTPException,
 File, UploadFile)
 
 from pathlib import Path
-import tempfile
+import uuid
 from sqlalchemy.orm import Session
 from math import ceil
 from datetime import date
@@ -266,12 +266,10 @@ def import_properties_from_pdf(
             detail="Only PDF files are supported",
         )
 
-    with tempfile.NamedTemporaryFile(
-        delete=False,
-        suffix=".pdf",
-    ) as temp_file:
-        temp_file.write(file.file.read())
-        temp_path = Path(temp_file.name)
+    upload_dir = Path("data/uploads").resolve()
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    stored_path = upload_dir / (uuid.uuid4().hex + ".pdf")
+    stored_path.write_bytes(file.file.read())
 
     try:
         from app.ingestion.pdf_source import PDFSourceAdapter
@@ -279,7 +277,7 @@ def import_properties_from_pdf(
 
         result = run_ingestion(
             db=db,
-            adapter=PDFSourceAdapter(temp_path),
+            adapter=PDFSourceAdapter(stored_path),
             user_id=current_user.id,
         )
 
@@ -298,7 +296,7 @@ def import_properties_from_pdf(
             "ingestion_run_id": result.get("ingestion_run_id"),
         }
     finally:
-        temp_path.unlink(missing_ok=True)
+        file.file.close()
 
 @router.get(
     "/{property_id}/valuations",
