@@ -12,6 +12,7 @@ when property parsing is incomplete or fails later.
 """
 
 from datetime import datetime, timezone
+import logging
 import traceback
 
 from sqlalchemy.orm import Session
@@ -20,6 +21,8 @@ from app.ingestion.base import SourceAdapter
 from app.ingestion.document_ingest import ingest_document, ingest_documents
 from app.ingestion.save import save_ingested_properties
 from app.models import IngestionRun
+
+logger = logging.getLogger(__name__)
 
 
 def run_document_ingestion(
@@ -113,9 +116,21 @@ def run_ingestion(
 
         extracted_items = []
         document_only_items = []
+        extraction_errors = []
 
         for item in raw_items:
-            extracted = adapter.extract(item)
+            try:
+                extracted = adapter.extract(item)
+            except Exception as exc:
+                # OCR/property parsing must not discard the source artifact.
+                # Retain the raw document for later extraction/reprocessing.
+                logger.exception(
+                    "Property extraction failed for %s; preserving source document",
+                    adapter.__class__.__name__,
+                )
+                extraction_errors.append(str(exc))
+                extracted = None
+
             documents = adapter.get_documents(item) or []
 
             pages = None
@@ -185,6 +200,7 @@ def run_ingestion(
             "saved": save_result["saved"],
             "skipped": save_result["skipped"],
             "documents_ingested_without_property": document_only_count,
+            "extraction_errors": extraction_errors,
         }
 
     except Exception as exc:
