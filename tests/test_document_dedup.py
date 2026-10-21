@@ -228,3 +228,23 @@ def test_pipeline_persists_document_when_property_extraction_fails(client, db):
     assert result["extraction_errors"] == ["synthetic OCR/parser failure"]
     assert db.query(Document).count() == 1
     assert db.query(DocumentChunk).count() == 1
+
+
+
+def test_pdf_adapter_retains_scanned_pdf_when_no_text_is_extracted(tmp_path, monkeypatch):
+    from app.ingestion.pdf_source import PDFSourceAdapter
+
+    pdf_path = tmp_path / "scanned-notice.pdf"
+    pdf_path.write_bytes(b"%PDF-test-placeholder")
+    adapter = PDFSourceAdapter(pdf_path)
+    monkeypatch.setattr(adapter, "_load_pages", lambda: ["", ""])
+    monkeypatch.setattr(
+        "app.ingestion.pdf_source.extract_properties_from_pages",
+        lambda pages: [],
+    )
+
+    items = adapter.fetch()
+
+    assert len(items) == 1
+    assert items[0]["document_only"] is True
+    assert items[0]["pages"] == ["", ""]
