@@ -13,3 +13,4 @@ apscheduler>=3.10,<4
 python-multipart>=0.0.9
 pdf2image>=1.17
 pytesseract>=0.3.10
+httpx2>=0.1
