@@ -13,6 +13,34 @@ function formatINR(value: number | string | null | undefined): string {
   return `₹${n.toLocaleString("en-IN")}`;
 }
 
+function deduplicateDocuments(items: DocumentItem[]): DocumentItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    let sourceUrl = (item.source_url || "").trim();
+    try {
+      const parsed = new URL(sourceUrl);
+      parsed.hash = "";
+      parsed.hostname = parsed.hostname.toLowerCase();
+      sourceUrl = parsed.toString();
+    } catch {
+      sourceUrl = sourceUrl.split("#", 1)[0];
+    }
+
+    // Title is part of the identity because some auction portals serve many
+    // distinct notices from the same generic endpoint URL.
+    const key = [
+      sourceUrl,
+      item.source_name,
+      item.document_type,
+      item.title || item.filename || "",
+    ].join("\u001f");
+
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 interface Property {
   id: number;
   address: string;
@@ -104,7 +132,7 @@ function PropertyDetails() {
     setDocumentsLoading(true);
     api
       .get<DocumentItem[]>(`/properties/${id}/documents`)
-      .then((res) => setDocuments(res.data))
+      .then((res) => setDocuments(deduplicateDocuments(res.data)))
       .catch(() => setDocuments([]))
       .finally(() => setDocumentsLoading(false));
   }, [id]);
@@ -229,7 +257,7 @@ function PropertyDetails() {
         if (results[0].status === "fulfilled") setProperty(results[0].value.data);
         if (results[1].status === "fulfilled") setAnalysis(results[1].value.data);
         if (results[2].status === "fulfilled") {
-          setDocuments(results[2].value.data);
+          setDocuments(deduplicateDocuments(results[2].value.data));
           setDocumentsLoading(false);
         }
         if (results[3].status === "fulfilled") setEvidence(results[3].value);
