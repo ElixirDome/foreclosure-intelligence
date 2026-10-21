@@ -177,16 +177,24 @@ def get_or_create_document(
 
     document = None
     if canonical_url:
-        query = db.query(Document).filter(
-            Document.source_url == canonical_url,
-            Document.source_name == source_name,
-            Document.document_type == document_type,
+        # Compare canonicalized stored URLs too, so records created before
+        # URL normalization (e.g. with fragments or uppercase hosts) are reused.
+        candidates = (
+            db.query(Document)
+            .filter(
+                Document.source_name == source_name,
+                Document.document_type == document_type,
+            )
+            .order_by(Document.id.desc())
+            .all()
         )
-        if title:
-            query = query.filter(Document.title == title)
-        else:
-            query = query.filter(Document.title.is_(None))
-        document = query.order_by(Document.id.desc()).first()
+        for candidate in candidates:
+            if (
+                canonicalize_source_url(candidate.source_url) == canonical_url
+                and candidate.title == title
+            ):
+                document = candidate
+                break
 
     # Only use the global hash when there is no matching source identity.
     if document is None and content_hash:
