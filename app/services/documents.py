@@ -199,7 +199,7 @@ def get_or_create_document(
     if document is not None:
         old_hash = document.content_hash
         content_changed = bool(
-            content_hash and old_hash and content_hash != old_hash
+            content_hash and content_hash != old_hash
         )
 
         if content_changed:
