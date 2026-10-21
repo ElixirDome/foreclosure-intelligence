@@ -1,7 +1,7 @@
 """Admin-configured HTML listing source with declarative extraction rules.
 
-Supported rules are CSS item_selector plus regexes for reserve and EMD.
-This adapter intentionally does not execute user-supplied code.
+Supported rules are CSS item_selector plus regexes for opening bid, reserve,
+and EMD. This adapter intentionally does not execute user-supplied code.
 """
 
 from __future__ import annotations
@@ -76,14 +76,17 @@ class CustomHtmlSourceAdapter(SourceAdapter):
         text = item.get("text") or BeautifulSoup(
             item.get("html") or "", "html.parser"
         ).get_text(" ", strip=True)
+        opening_bid = _money(text, self.rules.get("opening_bid"))
         reserve = _money(text, self.rules.get("reserve"))
         emd = _money(text, self.rules.get("emd"))
         return {
             "address": (item.get("title") or text[:240] or "Unknown listing").strip(),
             "reserve_price": reserve,
-            "opening_bid": reserve,
+            "opening_bid": opening_bid,
             "emd": emd,
-            "price": reserve,
+            # Keep the legacy price field aligned to an explicitly extracted
+            # opening bid, never silently copy the reserve price into it.
+            "price": opening_bid,
             "source_url": item.get("url") or self.listing_url,
             "source_name": self.name,
         }

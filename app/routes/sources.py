@@ -19,8 +19,8 @@ from app.security import require_role
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
-_ALLOWED_RULES = {"item_selector", "reserve", "emd", "limit"}
-_REGEX_RULES = {"reserve", "emd"}
+_ALLOWED_RULES = {"item_selector", "opening_bid", "reserve", "emd", "limit"}
+_REGEX_RULES = {"opening_bid", "reserve", "emd"}
 
 
 class ConnectSourceRequest(BaseModel):
