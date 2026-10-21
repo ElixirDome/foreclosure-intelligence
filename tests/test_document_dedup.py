@@ -297,4 +297,6 @@ def test_pdf_import_route_uses_pipeline_once_and_keeps_uploaded_file(client, mon
         assert captured["path"].is_file()
         assert captured["path"].read_bytes() == b"%PDF-test-upload"
     finally:
-        captured["path"].unlink(missing_ok=True)
+        stored_path = captured.get("path")
+        if stored_path is not None:
+            stored_path.unlink(missing_ok=True)
