@@ -308,21 +308,28 @@ def replace_document_chunks(
     Safe for re-ingestion of the same PDF: old chunks are removed and
     new ones written in chunk_index order.
     """
-    old_chunk_ids = (
-        db.query(DocumentChunk.id)
+    # Flush pending document updates before bulk deletes, then expire stale
+    # chunk objects so SQLite primary-key reuse cannot confuse the identity map.
+    db.flush()
+    old_chunk_ids = [
+        row[0]
+        for row in db.query(DocumentChunk.id)
         .filter(DocumentChunk.document_id == document.id)
-        .subquery()
-    )
-    # Evidence rows must survive rechunking, but old chunk references cannot.
-    db.query(Evidence).filter(
-        Evidence.document_chunk_id.in_(old_chunk_ids)
-    ).update(
-        {Evidence.document_chunk_id: None},
-        synchronize_session=False,
-    )
+        .all()
+    ]
+    # Evidence rows must survive manual rechunking, but old chunk references cannot.
+    if old_chunk_ids:
+        db.query(Evidence).filter(
+            Evidence.document_chunk_id.in_(old_chunk_ids)
+        ).update(
+            {Evidence.document_chunk_id: None},
+            synchronize_session=False,
+        )
     db.query(DocumentChunk).filter(
         DocumentChunk.document_id == document.id
     ).delete(synchronize_session=False)
+    db.flush()
+    db.expire_all()
 
     from app.services.embeddings import embed_text
 
