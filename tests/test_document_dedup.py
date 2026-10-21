@@ -92,6 +92,10 @@ def test_source_url_fragment_does_not_create_duplicate(client, db):
         title="Auction notice 123",
         content=b"same notice",
     )
+    # Simulate an existing pre-normalization database row.
+    first.source_url = "https://BANK-A.example/notice.pdf#page=1"
+    db.commit()
+
     second, second_created = get_or_create_document(
         db,
         source_name="Bank A",
