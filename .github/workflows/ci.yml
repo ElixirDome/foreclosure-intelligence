@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: sqlite:///./ci.db
+      JWT_SECRET_KEY: ci-only-test-secret
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
