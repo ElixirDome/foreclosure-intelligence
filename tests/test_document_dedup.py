@@ -1,4 +1,5 @@
-from app.models import Document
+from app.models import Document, DocumentChunk, Evidence, Property
+from app.ingestion.document_ingest import ingest_document
 from app.services.documents import get_or_create_document
 
 
@@ -106,3 +107,82 @@ def test_source_url_fragment_does_not_create_duplicate(client, db):
     assert first.id == second.id
     assert second.source_url == "https://bank-a.example/notice.pdf"
     assert db.query(Document).count() == 1
+
+
+
+def test_unchanged_reingestion_keeps_chunks_and_changed_content_rebuilds_them(client, db):
+    payload = {
+        "source_name": "Bank A",
+        "source_url": "https://bank-a.example/notice.txt",
+        "document_type": "auction_notice",
+        "title": "Auction notice 123",
+        "content": "Reserve price: 40 lakh",
+        "mime_type": "text/plain",
+    }
+
+    first = ingest_document(db, payload, pages=["Reserve price: 40 lakh"])
+    db.commit()
+    document_id = first["document"].id
+    first_chunk = (
+        db.query(DocumentChunk)
+        .filter(DocumentChunk.document_id == document_id)
+        .one()
+    )
+
+    property_obj = Property(
+        user_id=1,
+        address="123 Test Road",
+        property_key="test-document-dedup-property",
+    )
+    db.add(property_obj)
+    db.flush()
+    evidence = Evidence(
+        property_id=property_obj.id,
+        document_id=document_id,
+        document_chunk_id=first_chunk.id,
+        field="reserve_price",
+        value="4000000",
+        page_number=1,
+        source_text="Reserve price: 40 lakh",
+        extraction_method="test",
+        confidence=0.9,
+    )
+    db.add(evidence)
+    db.commit()
+
+    unchanged = ingest_document(
+        db,
+        payload,
+        pages=["Reserve price: 40 lakh"],
+    )
+    db.commit()
+    unchanged_chunk = (
+        db.query(DocumentChunk)
+        .filter(DocumentChunk.document_id == document_id)
+        .one()
+    )
+    assert unchanged["document"].id == document_id
+    assert unchanged_chunk.id == first_chunk.id
+    assert db.query(Evidence).count() == 1
+
+    revised_payload = {
+        **payload,
+        "content": "Revised reserve price: 35 lakh",
+    }
+    revised = ingest_document(
+        db,
+        revised_payload,
+        pages=["Revised reserve price: 35 lakh"],
+    )
+    db.commit()
+    revised_chunks = (
+        db.query(DocumentChunk)
+        .filter(DocumentChunk.document_id == document_id)
+        .all()
+    )
+
+    assert revised["document"].id == document_id
+    assert len(revised_chunks) == 1
+    assert revised_chunks[0].text == "Revised reserve price: 35 lakh"
+    # Old facts must not remain linked to a revised notice.
+    assert db.query(Evidence).count() == 0
