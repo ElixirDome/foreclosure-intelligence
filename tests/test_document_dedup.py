@@ -186,3 +186,40 @@ def test_unchanged_reingestion_keeps_chunks_and_changed_content_rebuilds_them(cl
     assert revised_chunks[0].text == "Revised reserve price: 35 lakh"
     # Old facts must not remain linked to a revised notice.
     assert db.query(Evidence).count() == 0
+
+
+
+def test_pipeline_persists_document_when_property_extraction_fails(client, db):
+    from app.ingestion.base import SourceAdapter, SourceDocument
+    from app.ingestion.pipeline import run_ingestion
+
+    class DocumentOnlyAdapter(SourceAdapter):
+        def fetch(self):
+            return [{"pages": ["A sale notice with no recognized property fields"]}]
+
+        def extract(self, item):
+            return None
+
+        def get_documents(self, item):
+            return [
+                SourceDocument(
+                    source_name="TestBank",
+                    source_url="https://testbank.example/notice.txt",
+                    document_type="auction_notice",
+                    title="Unparsed notice",
+                    content="A sale notice with no recognized property fields",
+                    mime_type="text/plain",
+                )
+            ]
+
+    result = run_ingestion(
+        db=db,
+        adapter=DocumentOnlyAdapter(),
+        user_id=1,
+    )
+
+    assert "error" not in result
+    assert result["items_extracted"] == 0
+    assert result["documents_ingested_without_property"] == 1
+    assert db.query(Document).count() == 1
+    assert db.query(DocumentChunk).count() == 1
