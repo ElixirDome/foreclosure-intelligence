@@ -81,6 +81,21 @@ function PropertyDetails() {
     getPropertyDeal(Number(id))
       .then(setDealIntel)
       .catch(() => setDealIntel(null));
+
+    api.get<Array<{
+      estimated_value: number | string;
+      valuation_method: string;
+      confidence: number | string | null;
+    }>>("/properties/" + id + "/valuations")
+      .then((response) => {
+        const latest = response.data[0];
+        setMarketValuation(latest ? {
+          estimated_value: Number(latest.estimated_value),
+          valuation_method: latest.valuation_method,
+          confidence: latest.confidence == null ? null : Number(latest.confidence),
+        } : null);
+      })
+      .catch(() => setMarketValuation(null));
   }, [id]);
 
 
