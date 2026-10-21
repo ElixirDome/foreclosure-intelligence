@@ -187,6 +187,65 @@ function PropertyDetails() {
     loadAnalysis();
   }, [id]);
 
+  useEffect(() => {
+    if (!id) return;
+
+    let active = true;
+    let inFlight = false;
+
+    async function refreshLiveData() {
+      if (!active || inFlight || document.visibilityState === "hidden") return;
+      inFlight = true;
+      try {
+        const results = await Promise.allSettled([
+          api.get<Property>("/properties/" + id),
+          api.get<PropertyAnalysis>("/properties/" + id + "/analysis"),
+          api.get<DocumentItem[]>("/properties/" + id + "/documents"),
+          getPropertyEvidence(Number(id)),
+          getPropertyDeal(Number(id)),
+          api.get<Array<{
+            estimated_value: number | string;
+            valuation_method: string;
+            confidence: number | string | null;
+          }>>("/properties/" + id + "/valuations"),
+        ]);
+
+        if (!active) return;
+        if (results[0].status === "fulfilled") setProperty(results[0].value.data);
+        if (results[1].status === "fulfilled") setAnalysis(results[1].value.data);
+        if (results[2].status === "fulfilled") {
+          setDocuments(results[2].value.data);
+          setDocumentsLoading(false);
+        }
+        if (results[3].status === "fulfilled") setEvidence(results[3].value);
+        if (results[4].status === "fulfilled") setDealIntel(results[4].value);
+        if (results[5].status === "fulfilled") {
+          const latest = results[5].value.data[0];
+          setMarketValuation(latest ? {
+            estimated_value: Number(latest.estimated_value),
+            valuation_method: latest.valuation_method,
+            confidence: latest.confidence == null ? null : Number(latest.confidence),
+          } : null);
+        }
+      } catch (err) {
+        console.error("Property refresh failed.", err);
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    const timer = window.setInterval(() => { void refreshLiveData(); }, 30_000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshLiveData();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [id]);
   if (loading) {
     return <div className="page">Loading property...</div>;
   }
