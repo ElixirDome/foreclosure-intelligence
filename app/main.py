@@ -1,4 +1,3 @@
-
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -51,7 +50,6 @@ app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(intelligence_router)
 app.include_router(sources_router)
-app.include_router(sources_router)
 
 
 @app.get("/")
@@ -68,5 +66,3 @@ def root():
             "evidence": "/properties/{id}/evidence",
         },
     }
-
-
