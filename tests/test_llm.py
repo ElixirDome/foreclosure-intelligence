@@ -38,36 +38,35 @@ def test_local_llm_provider_initializes():
 
     assert provider.model == "llama3.2:3b"
 
-def test_local_llm_provider_generates_analysis():
+def test_local_llm_provider_generates_analysis(monkeypatch):
+    class FakeOllamaClient:
+        def __init__(self, host, timeout):
+            self.host = host
+            self.timeout = timeout
+
+        def chat(self, **kwargs):
+            return {
+                "message": {
+                    "content": """{
+                        "summary": "Test summary",
+                        "strengths": ["Test strength"],
+                        "risks": ["Test risk"],
+                        "due_diligence": ["Verify title"],
+                        "recommendation": "Investigate further."
+                    }"""
+                }
+            }
+
+    monkeypatch.setattr("app.services.llm.Client", FakeOllamaClient)
     provider = LocalLLMProvider()
-
-    result = provider.generate(
-        """
-Return a JSON object with exactly these fields:
-
-summary
-strengths
-risks
-due_diligence
-recommendation
-
-Use this property:
-
-Address: 123 Main Street
-Estimated value: 90000
-Opening bid: 60000
-Discount percentage: 33.33
-Risk level: 2
-Deal score: 23.33
-"""
-    )
+    result = provider.generate("test prompt")
 
     assert isinstance(result, PropertyAIAnalysis)
-    assert result.summary
-    assert isinstance(result.strengths, list)
-    assert isinstance(result.risks, list)
-    assert isinstance(result.due_diligence, list)
-    assert result.recommendation  
+    assert result.summary == "Test summary"
+    assert result.strengths == ["Test strength"]
+    assert result.risks == ["Test risk"]
+    assert result.due_diligence == ["Verify title"]
+    assert result.recommendation == "Investigate further."
 
 def test_generate_property_analysis_with_fake_provider(fake_llm_provider):
     property_data = {

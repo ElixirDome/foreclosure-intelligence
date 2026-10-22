@@ -5,7 +5,7 @@ Depends, status, HTTPException,
 File, UploadFile)
 
 from pathlib import Path
-import tempfile
+import uuid
 from sqlalchemy.orm import Session
 from math import ceil
 from datetime import date
@@ -260,50 +260,43 @@ def import_properties_from_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not file.filename.lower().endswith(".pdf"):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=400,
             detail="Only PDF files are supported",
         )
 
-    with tempfile.NamedTemporaryFile(
-        delete=False,
-        suffix=".pdf",
-    ) as temp_file:
-
-        temp_file.write(file.file.read())
-        temp_path = Path(temp_file.name)
+    upload_dir = Path("data/uploads").resolve()
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    stored_path = upload_dir / (uuid.uuid4().hex + ".pdf")
+    stored_path.write_bytes(file.file.read())
 
     try:
         from app.ingestion.pdf_source import PDFSourceAdapter
         from app.ingestion.pipeline import run_ingestion
-        from app.ingestion.save import save_ingested_properties
-
-        adapter = PDFSourceAdapter(temp_path)
 
         result = run_ingestion(
             db=db,
-            adapter=adapter,
+            adapter=PDFSourceAdapter(stored_path),
+            user_id=current_user.id,
         )
 
-        save_result = save_ingested_properties(
-            db=db,
-            properties=result["items"],
-            user_id=current_user.id,
-            ingestion_run_id=result["ingestion_run_id"],
-        )
+        if result.get("error"):
+            raise HTTPException(
+                status_code=500,
+                detail=f"PDF ingestion failed: {result['error']}",
+            )
 
         return {
-            "message": "Properties imported successfully",
-            "saved_count": len(save_result["saved"]),
-            "skipped_count": len(save_result["skipped"]),
-            "properties": save_result["saved"],
-            "skipped": save_result["skipped"],
-            "ingestion_run_id": result["ingestion_run_id"],
+            "message": "PDF ingestion completed",
+            "saved_count": len(result.get("saved") or []),
+            "skipped_count": len(result.get("skipped") or []),
+            "properties": result.get("saved") or [],
+            "skipped": result.get("skipped") or [],
+            "ingestion_run_id": result.get("ingestion_run_id"),
         }
-
     finally:
-        temp_path.unlink(missing_ok=True)
+        file.file.close()
 
 @router.get(
     "/{property_id}/valuations",

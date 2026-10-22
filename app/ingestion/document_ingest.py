@@ -147,13 +147,28 @@ def ingest_document(
         extracted_text=extracted_text,
     )
 
+    content_changed = bool(
+        getattr(document, "_ingested_content_changed", False)
+    )
+    should_rechunk = force_rechunk or content_changed
+
     chunks = []
     if pages:
         chunks = ensure_document_chunks_from_pages(
             db,
             document,
             pages,
-            force=force_rechunk,
+            force=should_rechunk,
+        )
+    elif content_changed:
+        # Do not leave chunks/text from the previous bytes when the revised
+        # file could not be parsed. Evidence was invalidated by the upsert.
+        document.extracted_text = None
+        chunks = ensure_document_chunks_from_pages(
+            db,
+            document,
+            [],
+            force=True,
         )
 
     return {
