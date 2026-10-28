@@ -145,10 +145,9 @@ def format_sse(
 ) -> str:
     """Format payload according to the W3C Server-Sent Events specification."""
     payload_json = json.dumps(data)
-    lines = []
+    lines = [f"event: {event_type}"]
     if event_id is not None:
         lines.append(f"id: {event_id}")
-    lines.append(f"event: {event_type}")
     lines.append(f"retry: {retry_ms}")
     lines.append(f"data: {payload_json}")
     return "\n".join(lines) + "\n\n"

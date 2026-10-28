@@ -13,7 +13,11 @@ Flow:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
+import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy.orm import Session
 
@@ -245,13 +249,6 @@ def _format_structured_answer(
         lines.extend(f"  · {d}" for d in analysis.due_diligence)
         lines.append("")
     lines.append(f"Recommendation: {analysis.recommendation}")
-    lines.append("")
-    lines.append("Evidence sources used:")
-    kinds = sorted({i.kind for i in ctx.items})
-    lines.append("  " + ", ".join(kinds) if kinds else "  (none)")
-    for i, item in enumerate(ctx.items[:5], start=1):
-        snippet = item.text.replace("\n", " ")[:160]
-        lines.append(f"  [{i}] ({item.kind}) {item.title}: {snippet}")
     return "\n".join(lines)
 
 
@@ -410,6 +407,7 @@ def answer_question(
             mode=mode,
         )
 
+    t_start = time.perf_counter()
     ctx = build_multi_source_context(
         db,
         question,
@@ -418,6 +416,7 @@ def answer_question(
         mode=mode,
         doc_limit=limit,
     )
+    t_ctx = time.perf_counter()
     analysis = _structured_from_context(ctx)
     citations = _citations_from_context(ctx)
     kinds = sorted({i.kind for i in ctx.items})
@@ -432,6 +431,16 @@ def answer_question(
     else:
         text = _format_structured_answer(question, analysis, ctx)
         method = "structured_multi_source"
+
+    t_end = time.perf_counter()
+    logger.info(
+        "RAG latency profile: context=%.2fms synthesis=%.2fms total=%.2fms (method=%s, chunks=%d)",
+        (t_ctx - t_start) * 1000,
+        (t_end - t_ctx) * 1000,
+        (t_end - t_start) * 1000,
+        method,
+        len(ctx.by_kind("document")),
+    )
 
     return RAGAnswer(
         question=question,
