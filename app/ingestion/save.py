@@ -1,7 +1,9 @@
+import time
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.ingestion.document_ingest import ingest_document
+from app.services.live_events import broker
 from app.models import (
     Evidence,
     IngestionRun,
@@ -78,6 +80,45 @@ def _reconcile_property_from_source(property_obj: Property, property_data: dict)
     if auction_date is not None:
         property_obj.auction_date = auction_date
 
+    increment_amount = property_data.get("increment_amount")
+    if increment_amount is not None:
+        property_obj.increment_amount = increment_amount
+
+    if property_data.get("auction_start") is not None:
+        property_obj.auction_start = property_data["auction_start"]
+
+    if property_data.get("auction_end") is not None:
+        property_obj.auction_end = property_data["auction_end"]
+
+    if property_data.get("possession_type"):
+        property_obj.possession_type = property_data["possession_type"]
+
+    if property_data.get("property_sub_type"):
+        property_obj.property_sub_type = property_data["property_sub_type"]
+
+    if property_data.get("district") and not property_obj.district:
+        property_obj.district = property_data["district"]
+
+    if property_data.get("state") and not property_obj.state:
+        property_obj.state = property_data["state"]
+
+    if property_data.get("pincode") and not property_obj.pincode:
+        property_obj.pincode = property_data["pincode"]
+
+    if property_data.get("bank_name") and not property_obj.bank_name:
+        property_obj.bank_name = property_data["bank_name"]
+
+    if property_data.get("branch_name") and not property_obj.branch_name:
+        property_obj.branch_name = property_data["branch_name"]
+
+    if property_data.get("raw_status"):
+        property_obj.raw_status = property_data["raw_status"]
+
+    if property_data.get("extra_data"):
+        existing_extra = dict(property_obj.extra_data or {})
+        existing_extra.update(property_data["extra_data"])
+        property_obj.extra_data = existing_extra
+
 
 def save_ingested_properties(
     db: Session,
@@ -128,18 +169,30 @@ def save_ingested_properties(
                 address=property_data["address"],
                 city=property_data.get("city"),
                 locality=property_data.get("locality"),
+                district=property_data.get("district"),
+                state=property_data.get("state"),
+                pincode=property_data.get("pincode"),
                 area_sqft=property_data.get("area_sqft"),
                 opening_bid=property_data.get("opening_bid"),
                 reserve_price=property_data.get("reserve_price"),
                 emd=property_data.get("emd"),
+                increment_amount=property_data.get("increment_amount"),
                 price=property_data.get("opening_bid"),
                 property_type=property_data.get("property_type"),
+                property_sub_type=property_data.get("property_sub_type"),
+                possession_type=property_data.get("possession_type"),
                 survey_number=property_data.get("survey_number"),
                 auction_date=property_data.get("auction_date"),
+                auction_start=property_data.get("auction_start"),
+                auction_end=property_data.get("auction_end"),
                 foreclosure_status=(
                     property_data.get("foreclosure_status") or "scheduled"
                 ),
+                raw_status=property_data.get("raw_status"),
+                bank_name=property_data.get("bank_name"),
+                branch_name=property_data.get("branch_name"),
                 property_key=property_key,
+                extra_data=property_data.get("extra_data"),
             )
 
             try:
@@ -253,8 +306,62 @@ def save_ingested_properties(
 
     db.commit()
 
+    # Emit real-time events strictly after successful database commit
+    now = time.time()
+    for prop in saved:
+        broker.publish(
+            "property_created",
+            {
+                "property_id": prop.id,
+                "action": "created",
+                "address": prop.address,
+                "city": prop.city,
+                "locality": prop.locality,
+                "property_type": prop.property_type,
+                "reserve_price": float(prop.reserve_price) if prop.reserve_price is not None else None,
+                "emd": float(prop.emd) if prop.emd is not None else None,
+                "opening_bid": float(prop.opening_bid) if prop.opening_bid is not None else None,
+                "auction_date": prop.auction_date.isoformat() if prop.auction_date else None,
+                "foreclosure_status": prop.foreclosure_status or "scheduled",
+                "survey_number": prop.survey_number,
+                "area_sqft": prop.area_sqft,
+                "ingestion_run_id": ingestion_run_id,
+                "timestamp": now,
+            },
+        )
+
+    for skip in skipped:
+        if skip.get("reason") in ("updated_existing_property", "concurrent_duplicate_upsert"):
+            prop_id = skip["property_id"]
+            prop = db.query(Property).filter(Property.id == prop_id).first()
+            if prop:
+                broker.publish(
+                    "property_updated",
+                    {
+                        "property_id": prop.id,
+                        "action": "updated",
+                        "address": prop.address,
+                        "city": prop.city,
+                        "locality": prop.locality,
+                        "property_type": prop.property_type,
+                        "reserve_price": float(prop.reserve_price) if prop.reserve_price is not None else None,
+                        "emd": float(prop.emd) if prop.emd is not None else None,
+                        "opening_bid": float(prop.opening_bid) if prop.opening_bid is not None else None,
+                        "auction_date": prop.auction_date.isoformat() if prop.auction_date else None,
+                        "foreclosure_status": prop.foreclosure_status or "scheduled",
+                        "survey_number": prop.survey_number,
+                        "area_sqft": prop.area_sqft,
+                        "ingestion_run_id": ingestion_run_id,
+                        "timestamp": now,
+                    },
+                )
+
     for property_obj in saved:
         db.refresh(property_obj)
+
+    if saved or any(s.get("reason") in ("updated_existing_property", "concurrent_duplicate_upsert") for s in skipped):
+        from app.services.cache import cache
+        cache.invalidate_prefix("property:")
 
     return {
         "saved": saved,

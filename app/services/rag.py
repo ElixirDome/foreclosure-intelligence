@@ -111,12 +111,21 @@ def _structured_from_context(ctx: MultiSourceContext) -> StructuredAnalysis:
 
     vals = ctx.by_kind("valuation")
     if vals:
-        strengths.append(
-            f"Valuation on file: {vals[0].metadata.get('estimated_value')}"
-        )
-        conf = vals[0].metadata.get("confidence")
-        if conf is not None and conf < 0.5:
-            risks.append("Valuation confidence is low")
+        val_est = vals[0].metadata.get("estimated_value")
+        if val_est is not None:
+            try:
+                strengths.append(f"Independent valuation on file: ₹{float(val_est):,.0f}")
+            except (ValueError, TypeError):
+                strengths.append(f"Independent valuation on file: {val_est}")
+            conf = vals[0].metadata.get("confidence")
+            if conf is not None and conf < 0.5:
+                risks.append("Valuation confidence is low (< 0.50)")
+        else:
+            risks.append("Independent market valuation is currently unavailable")
+            diligence.append("Obtain an independent property valuation before bidding")
+    elif ctx.property_ids:
+        risks.append("Independent market valuation is currently unavailable")
+        diligence.append("Commission an independent property valuation before bidding")
 
     comps = ctx.by_kind("comparable")
     if len(comps) >= 3:
@@ -132,9 +141,9 @@ def _structured_from_context(ctx: MultiSourceContext) -> StructuredAnalysis:
             risks.append("Auction status is sold")
         if "foreclosure_status: cancelled" in lower:
             risks.append("Auction status is cancelled")
-        if "opening_bid:" in p.text and "estimated_value: None" in p.text:
-            risks.append("Opening bid present without estimated market value")
-            diligence.append("Commission an independent valuation")
+        if ("opening_bid:" in p.text or "reserve_price:" in p.text) and ("estimated_value: None" in p.text or "automated_comparable_estimate: None" in p.text):
+            risks.append("Auction reserve present without independent market valuation")
+            diligence.append("Commission an independent property valuation to verify market spread")
 
     docs = ctx.by_kind("document")
     if docs:
