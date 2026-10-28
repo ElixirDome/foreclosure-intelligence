@@ -55,13 +55,31 @@ GREETING_MESSAGE = (
     "or guide you through connecting bank auction portals."
 )
 
+HOW_ARE_YOU_MESSAGE = (
+    "I'm doing well, thank you! I am your Foreclosure Research Analyst. "
+    "I can help evaluate auction properties, explain reserve prices and EMD requirements, "
+    "review title and encumbrance risks, or guide you through connecting bank auction portals."
+)
+
 DEFAULT_SUGGESTED_ACTIONS = [
     {"title": "Explore Dashboard Auctions", "url": "/dashboard"},
     {"title": "Connect a Bank Source", "url": "/import"},
 ]
 
-GREETING_REGEX = re.compile(
-    r"^(hi|hello|hey|good\s+morning|good\s+afternoon|good\s+evening|greetings|howdy|sup|yo|namaste)(\s+(there|analyst|bot|assistant))?[\s!.,?:;]*$",
+CHECK_IN_REGEX = re.compile(
+    r"^(?:(?:hi|hello|hey|greetings)[\s,!.]*)?(?:how\s+(?:are\s+you(?:\s+doing)?|is\s+it\s+going|do\s+you\s+do)|how['’]?s\s+it\s+going)[\s!.,?:;]*$",
+    re.IGNORECASE,
+)
+
+GREETING_PATTERNS = [
+    r"(?:hi|hello|hey|greetings|howdy|sup|yo|namaste)(?:\s+(?:there|analyst|bot|assistant))?",
+    r"good\s+(?:morning|afternoon|evening|day)",
+    r"(?:(?:hi|hello|hey|greetings)[\s,!.]*)?(?:how\s+(?:are\s+you(?:\s+doing)?|is\s+it\s+going|do\s+you\s+do)|how['’]?s\s+it\s+going)",
+    r"(?:who\s+are\s+you|what\s+can\s+you\s+do|what\s+are\s+you|tell\s+me\s+about\s+yourself|can\s+you\s+help\s+me)",
+]
+
+GREETING_COMBINED_REGEX = re.compile(
+    r"^(?:" + "|".join(GREETING_PATTERNS) + r")[\s!.,?:;]*$",
     re.IGNORECASE,
 )
 
@@ -177,13 +195,18 @@ def classify_query(
             requires_retrieval=False,
         )
 
-    # 2. Greeting check
-    if GREETING_REGEX.match(q_clean.strip()):
+    # 2. Greeting & Conversational Check-In check (bypasses retrieval entirely)
+    if GREETING_COMBINED_REGEX.match(q_clean.strip()):
+        answer_text = (
+            HOW_ARE_YOU_MESSAGE
+            if CHECK_IN_REGEX.match(q_clean.strip())
+            else GREETING_MESSAGE
+        )
         return QueryUnderstandingResult(
             intent=QueryIntent.GREETING,
             cleaned_query=q_clean,
             property_id=property_id,
-            direct_answer=GREETING_MESSAGE,
+            direct_answer=answer_text,
             action_links=list(DEFAULT_SUGGESTED_ACTIONS),
             requires_retrieval=False,
         )

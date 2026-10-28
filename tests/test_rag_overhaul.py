@@ -140,13 +140,28 @@ class TestQueryUnderstandingAndIntent:
         assert res.intent == "ambiguous_clarification"
         assert CLARIFICATION_PROMPT in res.answer
 
-    @pytest.mark.parametrize("greeting", ["hi", "hello", "hey", "good morning", "Hello!", "Hey there"])
+    @pytest.mark.parametrize("greeting", [
+        "hi", "hello", "hey", "good morning", "Hello!", "Hey there",
+        "How are you?", "how are you doing", "how's it going?", "Hello, how are you?",
+        "who are you", "what can you do?", "can you help me?",
+    ])
     def test_greetings_return_polite_introduction(self, db, greeting):
+        """Conversational greetings and check-ins bypass retrieval and return friendly guidance."""
         res = process_analyst_turn(db, greeting)
         assert res.intent == "greeting"
         assert "Foreclosure Research Analyst" in res.answer
         assert len(res.citations) == 0
+        assert res.structured is None
         assert any("/dashboard" in link["url"] for link in res.action_links)
+
+    def test_how_are_you_specifically_bypasses_retrieval(self, db):
+        """Regression test: 'How are you?' must return conversational answer, not raw auction OCR."""
+        res = process_analyst_turn(db, "How are you?")
+        assert res.intent == "greeting"
+        assert "I'm doing well, thank you!" in res.answer
+        assert len(res.citations) == 0
+        assert "Document Evidence Summary" not in res.answer
+        assert "SALE NOTICE" not in res.answer
 
 
 class TestDomainTerminology:
@@ -259,3 +274,14 @@ class TestHTTPDocumentsRAGRoute:
         assert "SARFAESI" in data["answer"]
         assert data["method"] == "terminology"
         assert len(data["citations"]) >= 1
+
+    def test_http_rag_how_are_you_greeting(self):
+        client = TestClient(app)
+        resp = client.post("/documents/rag", json={"question": "How are you?"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "I'm doing well, thank you!" in data["answer"]
+        assert data["method"] == "greeting"
+        assert len(data["citations"]) == 2  # Action pills only (Explore, Connect)
+        assert all(c["kind"] == "action" for c in data["citations"])
+        assert data["chunks_used"] == 2
