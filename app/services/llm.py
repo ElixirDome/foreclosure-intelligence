@@ -82,6 +82,13 @@ class LLMProvider(ABC):
     ) -> PropertyAIAnalysis:
         pass
 
+    def generate_raw(
+        self,
+        prompt: str,
+    ) -> str:
+        """Generate unformatted raw markdown or textual answer."""
+        raise NotImplementedError("generate_raw not implemented for this provider")
+
 
 # the model may return JSON wrapped in Markdown fences.
 ### Add a small parser
@@ -160,6 +167,24 @@ class LocalLLMProvider(LLMProvider):
         except Exception as e:
             raise RuntimeError(
                 f"Failed to generate AI property analysis: {e}"
+            ) from e
+
+    def generate_raw(self, prompt: str) -> str:
+        """Generate unstructured markdown/text response for RAG or search planning."""
+        try:
+            response = self.client.chat(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+            )
+            return response["message"]["content"]
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to generate raw LLM text: {e}"
             ) from e
 
 

@@ -122,6 +122,9 @@ def bm25_search(
     """
     Genuine Okapi BM25 lexical ranker across stored document chunks.
     """
+    if not query or not query.strip():
+        return []
+
     q = (
         db.query(DocumentChunk, Document)
         .join(Document, Document.id == DocumentChunk.document_id)
@@ -174,6 +177,9 @@ def vector_search(
     """
     Stored vector retrieval using 256-dim feature-hashed bag-of-words vectors.
     """
+    if not query or not query.strip():
+        return []
+
     query_vec = embed_text(query)
     q = (
         db.query(DocumentChunk, Document)
@@ -309,6 +315,9 @@ def parallel_search(
     Executes multi-query variants and independent retrieval branches (BM25 + Vector)
     concurrently, with graceful failure recovery and reciprocal-rank fusion.
     """
+    if not query or not query.strip():
+        return []
+
     variants = generate_query_variants(query)
     ranked_lists: list[list[RetrievedChunk]] = []
 

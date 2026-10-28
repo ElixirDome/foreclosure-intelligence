@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import logging
+import re
 import time
 from typing import Any
 
@@ -72,19 +73,33 @@ class RAGAnswer:
 
 def _citations_from_context(ctx: MultiSourceContext) -> list[Citation]:
     citations: list[Citation] = []
+    seen_keys: set[tuple] = set()
     for item in ctx.items:
         meta = item.metadata or {}
+        doc_id = meta.get("document_id")
+        page_num = meta.get("page_number")
+        prop_id = meta.get("property_id")
+
+        dedup_key = (item.kind, doc_id, page_num, item.source_id)
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+
+        clean_text = item.text.strip()
+        if len(clean_text) > 350:
+            clean_text = clean_text[:350].rsplit(" ", 1)[0] + "..."
+
         citations.append(
             Citation(
                 kind=item.kind,
                 source_id=item.source_id,
                 title=item.title,
-                excerpt=item.text[:400],
-                score=item.score,
-                document_id=meta.get("document_id"),
+                excerpt=clean_text,
+                score=round(float(item.score), 2),
+                document_id=doc_id,
                 chunk_id=meta.get("chunk_id"),
-                page_number=meta.get("page_number"),
-                property_id=meta.get("property_id"),
+                page_number=page_num,
+                property_id=prop_id,
                 filename=meta.get("filename"),
                 source_name=meta.get("source_name"),
             )
@@ -295,28 +310,48 @@ EVIDENCE:
     raise RuntimeError("provider does not support generation")
 
 
-def _legacy_document_only_answer(
+def _synthesize_document_answer(
     question: str,
     chunks: list[RetrievedChunk],
 ) -> str:
+    """Synthesizes a grounded, underwriter-oriented answer from retrieved document chunks."""
     if not chunks:
         return (
             "No relevant document evidence was found for this question. "
-            "Ingest auction notices first, then retry."
+            "Please verify the auction notice has been ingested, then retry."
         )
+
     top = chunks[0]
-    lines = [
-        f"Based on document evidence (score={top.score:.2f}):",
-        "",
-        top.text.strip()[:1200],
-    ]
-    if top.page_number:
-        lines.append("")
-        lines.append(
-            f"[Source: document_id={top.document_id}, "
-            f"page={top.page_number}, chunk={top.chunk_index}]"
+    if top.score < 0.15:
+        return (
+            "The retrieved notice excerpts do not contain sufficient specific evidence "
+            "to answer this question definitively. Please check the property lot number "
+            "or review the complete auction notice document."
         )
+
+    doc_name = top.filename or top.document_title or f"Document #{top.document_id}"
+    page_info = f" (Page {top.page_number})" if top.page_number else ""
+
+    clean_text = re.sub(r"\s+", " ", top.text.strip())
+    if len(clean_text) > 800:
+        clean_text = clean_text[:800].rsplit(" ", 1)[0] + "..."
+
+    lines = [
+        "### Document Evidence Summary",
+        "",
+        f"Based on public auction records in **{doc_name}**{page_info}:",
+        "",
+        f"> \"{clean_text}\"",
+        "",
+        "⚠️ **Underwriting Verification Note**:",
+        "- Verify whether the secured creditor has physical vacant possession or symbolic possession.",
+        "- Confirm that encumbrance certificates and outstanding statutory dues have been reviewed prior to bidding.",
+    ]
     return "\n".join(lines)
+
+
+# Backwards compatibility alias
+_legacy_document_only_answer = _synthesize_document_answer
 
 
 def answer_question(
