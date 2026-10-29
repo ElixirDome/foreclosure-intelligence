@@ -29,15 +29,13 @@ def compute_content_hash(content: bytes | str) -> str:
 def chunk_pages(
     pages: list[str],
     *,
-    max_chars: int = 1800,
+    max_chars: int = 512,
+    overlap: int = 77,
 ) -> list[dict]:
     """
-    Build chunks from page-aware text.
-
-    Strategy (Phase 1 — no vectors yet):
-    - Prefer one chunk per page when the page is short enough.
-    - Split long pages on blank lines / paragraph boundaries.
-    - Keep page_number on every chunk for citation.
+    Build standard chunks from page-aware text.
+    Standardized to 512 characters with 15% overlap (~77 chars).
+    Keeps page_number on every chunk for citation integrity.
     """
     chunks: list[dict] = []
     chunk_index = 0
@@ -59,64 +57,46 @@ def chunk_pages(
             chunk_index += 1
             continue
 
-        # Split long pages into paragraph-sized pieces.
-        paragraphs = re.split(r"\n\s*\n", text)
-        buffer = ""
+        step = max(1, max_chars - overlap)
+        pos = 0
+        text_len = len(text)
 
-        for paragraph in paragraphs:
-            paragraph = paragraph.strip()
-            if not paragraph:
-                continue
+        while pos < text_len:
+            end = min(pos + max_chars, text_len)
+            if end < text_len:
+                # Look for sentence or whitespace boundary near the cut
+                best_cut = -1
+                for delim in ("\n\n", "\n", ". ", "? ", "! ", "; ", ", ", " "):
+                    cut = text.rfind(delim, pos + step // 2, end)
+                    if cut != -1:
+                        best_cut = cut + len(delim)
+                        break
+                if best_cut != -1:
+                    end = best_cut
 
-            candidate = f"{buffer}\n\n{paragraph}".strip() if buffer else paragraph
-
-            if len(candidate) <= max_chars:
-                buffer = candidate
-                continue
-
-            if buffer:
+            piece = text[pos:end].strip()
+            if piece:
                 chunks.append(
                     {
                         "chunk_index": chunk_index,
                         "page_number": page_number,
-                        "text": buffer,
-                        "metadata_json": {"strategy": "paragraph_split"},
+                        "text": piece,
+                        "metadata_json": {
+                            "strategy": "sliding_window_512",
+                            "offset": pos,
+                            "overlap": overlap,
+                        },
                     }
                 )
                 chunk_index += 1
 
-            # Paragraph itself may still exceed max_chars.
-            if len(paragraph) <= max_chars:
-                buffer = paragraph
-            else:
-                for start in range(0, len(paragraph), max_chars):
-                    piece = paragraph[start : start + max_chars].strip()
-                    if not piece:
-                        continue
-                    chunks.append(
-                        {
-                            "chunk_index": chunk_index,
-                            "page_number": page_number,
-                            "text": piece,
-                            "metadata_json": {
-                                "strategy": "hard_split",
-                                "offset": start,
-                            },
-                        }
-                    )
-                    chunk_index += 1
-                buffer = ""
+            if end >= text_len:
+                break
 
-        if buffer:
-            chunks.append(
-                {
-                    "chunk_index": chunk_index,
-                    "page_number": page_number,
-                    "text": buffer,
-                    "metadata_json": {"strategy": "paragraph_split"},
-                }
-            )
-            chunk_index += 1
+            next_pos = max(pos + 1, end - overlap)
+            if next_pos <= pos:
+                next_pos = pos + step
+            pos = next_pos
 
     return chunks
 
@@ -124,12 +104,13 @@ def chunk_pages(
 def chunk_plain_text(
     text: str,
     *,
-    max_chars: int = 1800,
+    max_chars: int = 512,
+    overlap: int = 77,
 ) -> list[dict]:
     """Chunk a single string of text with no page information."""
     if not text or not text.strip():
         return []
-    return chunk_pages([text], max_chars=max_chars)
+    return chunk_pages([text], max_chars=max_chars, overlap=overlap)
 
 
 def canonicalize_source_url(source_url: str | None) -> str:

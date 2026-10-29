@@ -63,7 +63,7 @@ HOW_ARE_YOU_MESSAGE = (
 
 DEFAULT_SUGGESTED_ACTIONS = [
     {"title": "Explore Dashboard Auctions", "url": "/dashboard"},
-    {"title": "Connect a Bank Source", "url": "/import"},
+    {"title": "Connect a Bank Source", "url": "/admin/import"},
 ]
 
 CHECK_IN_REGEX = re.compile(
@@ -80,6 +80,20 @@ GREETING_PATTERNS = [
 
 GREETING_COMBINED_REGEX = re.compile(
     r"^(?:" + "|".join(GREETING_PATTERNS) + r")[\s!.,?:;]*$",
+    re.IGNORECASE,
+)
+
+RETRY_PATTERNS = [
+    r"^(?:please\s+)?(?:try\s+again|retry|repeat|can\s+you\s+(?:try\s+again|retry))",
+    r"^(?:please\s+)?(?:try\s+again\s+to\s+)?(?:answer|re-?answer)\s+(?:the|that|my|teh)\s+(?:question|inquiry|query)",
+    r"^(?:what\s+(?:did\s+i|was\s+my)|repeat\s+my)\s+(?:previous|earlier|first|last)\s+question",
+    r"^(?:answer\s+again|try\s+answering\s+again)",
+    r"try\s+again\s+to\s+answer",
+    r"answer\s+(?:the|that|teh)\s+question\s+(?:i\s+asked|asked\s+earlier)",
+]
+
+RETRY_COMBINED_REGEX = re.compile(
+    r"(?:" + "|".join(RETRY_PATTERNS) + r")",
     re.IGNORECASE,
 )
 
@@ -176,6 +190,7 @@ def classify_query(
     query: str,
     property_id: int | None = None,
     db: Session | None = None,
+    conversation_history: list[dict[str, Any]] | None = None,
 ) -> QueryUnderstandingResult:
     """
     Analyzes intent, verifies conversation context, extracts referenced lot numbers,
@@ -211,7 +226,46 @@ def classify_query(
             requires_retrieval=False,
         )
 
-    # 3. Confidential Banking & Private Settlement Guardrail
+    # 3. Meta-reference / Retry resolution (e.g., "try again to answer the question i asked earlier")
+    if RETRY_COMBINED_REGEX.search(q_clean):
+        prior_user_question: str | None = None
+        prior_property_id: int | None = property_id
+        if conversation_history:
+            for turn in reversed(conversation_history):
+                role = turn.get("role")
+                text = (turn.get("text") or turn.get("content") or "").strip()
+                if (
+                    role == "user"
+                    and text
+                    and not RETRY_COMBINED_REGEX.search(text)
+                    and not GREETING_COMBINED_REGEX.match(text)
+                ):
+                    prior_user_question = text
+                    if not prior_property_id and turn.get("property_id"):
+                        prior_property_id = turn.get("property_id")
+                    break
+
+        if prior_user_question:
+            return classify_query(
+                prior_user_question,
+                property_id=prior_property_id,
+                db=db,
+                conversation_history=None,
+            )
+
+        return QueryUnderstandingResult(
+            intent=QueryIntent.FOLLOW_UP,
+            cleaned_query=q_clean,
+            property_id=property_id,
+            direct_answer=(
+                "I couldn't locate your previous question in our current session history. "
+                "Could you please specify which property lot number, auction notice, or topic you would like me to analyze?"
+            ),
+            action_links=list(DEFAULT_SUGGESTED_ACTIONS),
+            requires_retrieval=False,
+        )
+
+    # 4. Confidential Banking & Private Settlement Guardrail
     if any(k in q_lower for k in [
         "settlement", "ots", "one time settlement", "compromise amount",
         "private settlement", "borrower concession",

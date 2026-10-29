@@ -1,6 +1,7 @@
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 
 import requests
@@ -9,6 +10,14 @@ from app.services.property_classifier import is_residential_property
 from app.ingestion.base import SourceAdapter
 from app.services.pnb_extraction import extract_pnb_property
 from app.services.pnb_extraction import extract_pnb_properties
+from app.services.live_events import broker
+
+NON_PROPERTY_KEYWORDS = (
+    "vehicle", "vehicles", "car", "cars", "bus", "buses", "truck", "trucks",
+    "tractor", "tractors", "scrap", "furniture", "stationery", "computer", "printer",
+    "dead stock", "air conditioner", "generator", "two wheeler", "four wheeler",
+    "almirah", "old tyre", "unserviceable",
+)
 
 
 class PNBSourceAdapter(SourceAdapter):
@@ -56,6 +65,7 @@ class PNBSourceAdapter(SourceAdapter):
         # ---------------------------------------------------------
 
         auction_items = []
+        seen_targets: set[tuple[str, str]] = set()
 
         for row in soup.find_all("tr"):
             postback_link = row.find(
@@ -67,8 +77,17 @@ class PNBSourceAdapter(SourceAdapter):
                 continue
 
             title = postback_link.get_text(" ", strip=True) or "Untitled PNB auction document"
+            clean_title = title.strip()
 
-            if not title:
+            if not clean_title:
+                continue
+
+            # Skip pagination numbers and navigation controls (e.g., "1", "2", "...", "Next")
+            if (
+                clean_title.isdigit()
+                or len(clean_title) <= 2
+                or clean_title.lower() in {"next", "prev", "previous", "first", "last", "...", "more", "select"}
+            ):
                 continue
 
             href = postback_link.get(
@@ -84,9 +103,14 @@ class PNBSourceAdapter(SourceAdapter):
             if match is None:
                 continue
 
+            target_pair = (match.group(1), match.group(2))
+            if target_pair in seen_targets:
+                continue
+            seen_targets.add(target_pair)
+
             auction_items.append(
                 {
-                    "title": title,
+                    "title": clean_title,
                     "event_target": match.group(1),
                     "event_argument": match.group(2),
                 }
@@ -113,7 +137,7 @@ class PNBSourceAdapter(SourceAdapter):
                 f"{title}"
             )
 
-            # We currently only want property-sale notices.
+            # We currently only want real estate / property-sale notices.
             title_lower = (title or "").lower()
 
             if (
@@ -123,6 +147,24 @@ class PNBSourceAdapter(SourceAdapter):
             ):
                 print("  Skipping: not a sale/auction notice")
                 continue
+
+            # Exclude movable assets / non-real-estate notices (vehicles, scrap, etc.)
+            if any(kw in title_lower for kw in NON_PROPERTY_KEYWORDS):
+                print("  Skipping: movable asset / non-property notice")
+                continue
+
+            # Emit granular SSE progress for live UI update
+            broker.publish(
+                "ingestion_status",
+                {
+                    "source": "PNBSourceAdapter",
+                    "stage": "downloading_pdf",
+                    "current": index,
+                    "total": len(auction_items),
+                    "item_title": title,
+                    "timestamp": time.time(),
+                },
+            )
 
             post_data = form_data.copy()
 
@@ -191,9 +233,39 @@ class PNBSourceAdapter(SourceAdapter):
 
         return downloaded_items
 
-    def extract(self, item):
-        text = self._extract_ocr_text(item["pdf_path"])
+    def _extract_native_text(self, pdf_path):
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(str(pdf_path))
+            pages = []
+            for page in reader.pages:
+                pages.append(page.extract_text() or "")
+            return "\n".join(pages).strip()
+        except Exception:
+            return ""
 
+    def _get_text(self, pdf_path):
+        native = self._extract_native_text(pdf_path)
+        if len(native) >= 200:
+            return native
+        return self._extract_ocr_text(pdf_path)
+
+    def extract(self, item):
+        title = item.get("title", "")
+        broker.publish(
+            "ingestion_status",
+            {
+                "source": "PNBSourceAdapter",
+                "stage": "extracting_text",
+                "item_title": title,
+                "timestamp": time.time(),
+            },
+        )
+        text = self._get_text(item["pdf_path"])
+        print("\n--- OCR TEXT SAMPLE ---")
+        print(repr(text[:2500]))
+        print("--- END OCR SAMPLE ---\n")
+    
         properties = extract_pnb_properties(text)
 
         if not properties:
@@ -234,6 +306,45 @@ class PNBSourceAdapter(SourceAdapter):
                 "content": item["pdf_path"].read_bytes(),
             }
         ]
+
+    def get_evidence(self, item):
+        text = self._get_text(item["pdf_path"])
+        properties = extract_pnb_properties(text) or []
+        evidence = []
+        for prop in properties:
+            if prop.get("address"):
+                evidence.append({
+                    "field": "address",
+                    "value": prop["address"],
+                    "source_text": prop["address"][:200],
+                    "extraction_method": "regex_structured",
+                    "confidence": 0.95,
+                })
+            if prop.get("reserve_price") is not None:
+                evidence.append({
+                    "field": "reserve_price",
+                    "value": str(prop["reserve_price"]),
+                    "source_text": f"Reserve Price: {prop['reserve_price']}",
+                    "extraction_method": "regex_structured",
+                    "confidence": 0.95,
+                })
+            if prop.get("emd") is not None:
+                evidence.append({
+                    "field": "emd",
+                    "value": str(prop["emd"]),
+                    "source_text": f"EMD: {prop['emd']}",
+                    "extraction_method": "regex_structured",
+                    "confidence": 0.95,
+                })
+            if prop.get("auction_date"):
+                evidence.append({
+                    "field": "auction_date",
+                    "value": str(prop["auction_date"]),
+                    "source_text": f"Auction Date: {prop['auction_date']}",
+                    "extraction_method": "regex_structured",
+                    "confidence": 0.95,
+                })
+        return evidence
 
     def _extract_ocr_text(self, pdf_path):
         import time

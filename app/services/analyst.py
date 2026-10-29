@@ -56,6 +56,8 @@ def process_analyst_turn(
     property_id: int | None = None,
     user_id: int | None = None,
     provider: Any | None = None,
+    conversation_history: list[dict[str, Any]] | None = None,
+    mode: str = "hybrid",
 ) -> AnalystResponse:
     """Dispatches user query to specific domain tools or multi-source RAG."""
     # Load user location preferences if available
@@ -63,7 +65,12 @@ def process_analyst_turn(
     if user_id:
         user_pref = db.query(UserPreference).filter(UserPreference.user_id == user_id).first()
 
-    u_result = classify_query(question, property_id=property_id, db=db)
+    u_result = classify_query(
+        question,
+        property_id=property_id,
+        db=db,
+        conversation_history=conversation_history,
+    )
     q_clean = u_result.cleaned_query
     q_lower = q_clean.lower()
     resolved_prop_id = u_result.property_id
@@ -180,7 +187,7 @@ def process_analyst_turn(
         db=db,
         question=q_clean,
         property_id=resolved_prop_id,
-        mode="hybrid",
+        mode=mode,
         provider=provider,
     )
 
@@ -217,7 +224,7 @@ def _handle_source_onboarding_inquiry(question: str, q_lower: str) -> AnalystRes
         "Foreclosure Intelligence autonomously crawls and monitors bank e-auction portals. Here is how to connect a source:",
         "",
         "1. **Autonomous Discovery**:",
-        "   - Navigate to the **Admin Import Desk** (`/import`).",
+        "   - Navigate to the **Admin Import Desk** (`/admin/import`).",
         "   - Enter the bank name (e.g. `PNB`, `IBAPI`, `SBI`) or root website address.",
         "   - The autonomous crawler inspects navigation menus, sitemaps, SARFAESI auction grids, and downloadable notices.",
         "   - Review the discovered endpoint and sample preview, then click **Connect Source**.",
@@ -234,7 +241,7 @@ def _handle_source_onboarding_inquiry(question: str, q_lower: str) -> AnalystRes
     ]
 
     action_links = [
-        {"title": "Open Admin Source Connect Desk", "url": "/import"},
+        {"title": "Open Admin Source Connect Desk", "url": "/admin/import"},
     ]
 
     citations = [
@@ -242,7 +249,7 @@ def _handle_source_onboarding_inquiry(question: str, q_lower: str) -> AnalystRes
             kind="system",
             source_id="sys:onboarding",
             title="Foreclosure Source Connector Guide",
-            excerpt="Supported Bank Portals: Punjab National Bank (PNB at https://www.pnb.bank.in/EAuction.aspx), IBAPI (e-Bkray at https://ibapi.in), Custom Bank Portals. Admin Import Desk route: /import",
+            excerpt="Supported Bank Portals: Punjab National Bank (PNB at https://www.pnb.bank.in/EAuction.aspx), IBAPI (e-Bkray at https://ibapi.in), Custom Bank Portals. Admin Import Desk route: /admin/import",
             score=1.0,
         )
     ]

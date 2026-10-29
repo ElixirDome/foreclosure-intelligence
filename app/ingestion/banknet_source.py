@@ -169,6 +169,29 @@ class BankNetSourceAdapter(SourceAdapter):
         return items
 
     @staticmethod
+    def _extract_page_meta(payload: Any) -> dict[str, Any]:
+        meta: dict[str, Any] = {}
+        if not isinstance(payload, dict):
+            return meta
+        data = payload.get("data")
+        if isinstance(data, dict):
+            meta["total"] = (
+                data.get("total")
+                or data.get("recordsTotal")
+                or data.get("totalRecords")
+                or data.get("recordsFiltered")
+            )
+            meta["total_pages"] = (
+                data.get("total_pages")
+                or data.get("totalPages")
+                or data.get("pages")
+            )
+        elif isinstance(data, list):
+            meta["total"] = len(data)
+            meta["total_pages"] = 1
+        return meta
+
+    @staticmethod
     def _extract_hits(payload: Any) -> list[dict]:
         if not isinstance(payload, dict):
             return []

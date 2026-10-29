@@ -285,3 +285,68 @@ class TestHTTPDocumentsRAGRoute:
         assert len(data["citations"]) == 2  # Action pills only (Explore, Connect)
         assert all(c["kind"] == "action" for c in data["citations"])
         assert data["chunks_used"] == 2
+
+    def test_retry_resolution_with_history(self, db):
+        """Conversational retry with history resolves to the prior question."""
+        history = [
+            {"role": "user", "text": "What is the EMD for Lot #1?"},
+            {"role": "assistant", "text": "The EMD for Lot #1 is 300,000."},
+        ]
+        res = process_analyst_turn(
+            db,
+            "try again to answer teh question i asked earlier",
+            conversation_history=history,
+        )
+        assert "EMD" in res.answer or "Earnest Money" in res.answer or "300,000" in res.answer
+        assert res.intent in ("status_inquiry", "follow_up", "terminology", "investment_analysis")
+
+    def test_retry_without_history_prompts_clarification(self, db):
+        """Retry without history returns guidance without querying document chunks."""
+        res = process_analyst_turn(
+            db,
+            "try again to answer the question i asked earlier",
+            conversation_history=[],
+        )
+        assert "couldn't locate your previous question" in res.answer
+        assert res.intent == "follow_up"
+        assert len(res.citations) == 0
+
+    def test_standard_chunking_512_with_overlap(self):
+        """Standard chunking produces <=512 char chunks with overlap."""
+        from app.services.documents import chunk_pages, chunk_plain_text
+
+        sample_page = (
+            "Punjab National Bank E-Auction Notice under SARFAESI Act 2002. "
+            "Property details: Residential house situated at Civil Lines Pathankot measuring 1500 sqft. "
+            "Reserve price is Rs 30,00,000. EMD is Rs 3,00,000 to be deposited before auction date. "
+            "The property is in physical possession of the bank and free from encumbrances. "
+        ) * 5  # ~1250 characters
+
+        chunks = chunk_pages([sample_page])
+        assert len(chunks) >= 3
+        for c in chunks:
+            assert len(c["text"]) <= 512
+            assert c["page_number"] == 1
+
+        # Test overlap is active
+        plain_chunks = chunk_plain_text(sample_page)
+        assert len(plain_chunks) >= 3
+        # Check that end of chunk 0 has overlap in chunk 1
+        overlap_snippet = chunks[0]["text"][-30:]
+        assert overlap_snippet in chunks[1]["text"]
+
+    def test_keyword_retrieval_mode_integrity(self, db):
+        """Requesting mode='keyword' strictly preserves keyword mode."""
+        ans = answer_question(db, "What is the reserve price?", mode="keyword")
+        assert ans.mode == "keyword"
+
+    def test_list_sources_pre_seeds_pnb_and_banknet(self, db):
+        """list_sources automatically seeds PNB and BaankNet default sources."""
+        from app.routes.sources import list_sources
+        from app.models import User
+
+        admin = User(id=99, email="admin@example.com", role="admin")
+        sources = list_sources(db=db, _current_user=admin)
+        adapter_keys = {s.adapter_key for s in sources}
+        assert "pnb" in adapter_keys
+        assert "banknet" in adapter_keys

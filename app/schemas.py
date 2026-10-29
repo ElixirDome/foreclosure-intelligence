@@ -1,6 +1,6 @@
-from pydantic import BaseModel,ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime, date
-from typing import Literal
+from typing import Any, Literal
 #Pydantic is a library for validating and shaping data — specifically, checking that Python objects (usually built from JSON) match a schema you define, and converting/rejecting them accordingly
 
 
@@ -310,6 +310,7 @@ class RAGRequest(BaseModel):
     limit: int = 6
     # None = auto (investment questions / property_id → multi-source)
     multi_source: bool | None = None
+    conversation_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CitationResponse(BaseModel):
