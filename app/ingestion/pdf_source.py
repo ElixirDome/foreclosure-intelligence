@@ -45,9 +45,9 @@ class PDFSourceAdapter(SourceAdapter):
             self._evidence_by_item_id[id(item)] = result.evidence
             items.append(item)
 
-        # If the PDF has text but no properties matched, still return
-        # a document-only item so the file is retained and chunked.
-        if not items and any(p.strip() for p in pages):
+        # Keep the original PDF even when text extraction yields no text
+        # (e.g. a scanned notice) or property extraction finds no candidate.
+        if not items:
             items.append({
                 "property": None,
                 "evidence": [],

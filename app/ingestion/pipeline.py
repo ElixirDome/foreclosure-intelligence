@@ -12,14 +12,17 @@ when property parsing is incomplete or fails later.
 """
 
 from datetime import datetime, timezone
+import logging
 import traceback
 
 from sqlalchemy.orm import Session
 
 from app.ingestion.base import SourceAdapter
-from app.ingestion.document_ingest import ingest_documents
+from app.ingestion.document_ingest import ingest_document, ingest_documents
 from app.ingestion.save import save_ingested_properties
 from app.models import IngestionRun
+
+logger = logging.getLogger(__name__)
 
 
 def run_document_ingestion(
@@ -112,16 +115,35 @@ def run_ingestion(
         raw_items = adapter.fetch()
 
         extracted_items = []
+        document_only_items = []
+        extraction_errors = []
 
         for item in raw_items:
-            extracted = adapter.extract(item)
+            try:
+                extracted = adapter.extract(item)
+            except Exception as exc:
+                # OCR/property parsing must not discard the source artifact.
+                # Retain the raw document for later extraction/reprocessing.
+                logger.exception(
+                    "Property extraction failed for %s; preserving source document",
+                    adapter.__class__.__name__,
+                )
+                extraction_errors.append(str(exc))
+                extracted = None
+
+            documents = adapter.get_documents(item) or []
+
+            pages = None
+            if isinstance(item, dict):
+                pages = item.get("pages")
+            pages = pages or getattr(item, "pages", None)
 
             if extracted is None:
-                # Still allow document-only items to be ingested
-                # via run_document_ingestion; skip property path.
+                # Keep source documents even when property extraction fails.
+                document_only_items.extend(
+                    (document, pages) for document in documents
+                )
                 continue
-
-            documents = adapter.get_documents(item)
 
             get_evidence = getattr(
                 adapter,
@@ -134,11 +156,6 @@ def run_ingestion(
                 if get_evidence
                 else []
             )
-
-            pages = None
-            if isinstance(item, dict):
-                pages = item.get("pages")
-            pages = pages or getattr(item, "pages", None)
 
             if isinstance(extracted, list):
                 for property_data in extracted:
@@ -163,6 +180,13 @@ def run_ingestion(
             ingestion_run_id=ingestion_run.id,
         )
 
+        document_only_count = 0
+        for raw_document, pages in document_only_items:
+            ingest_document(db, raw_document, pages=pages)
+            document_only_count += 1
+        if document_only_count:
+            db.commit()
+
         ingestion_run.finished_at = datetime.now(timezone.utc)
         ingestion_run.status = "success"
         ingestion_run.items_found = len(raw_items)
@@ -175,6 +199,8 @@ def run_ingestion(
             "items_extracted": len(extracted_items),
             "saved": save_result["saved"],
             "skipped": save_result["skipped"],
+            "documents_ingested_without_property": document_only_count,
+            "extraction_errors": extraction_errors,
         }
 
     except Exception as exc:

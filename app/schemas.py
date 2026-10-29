@@ -1,6 +1,6 @@
-from pydantic import BaseModel,ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime, date
-from typing import Literal
+from typing import Any, Literal
 #Pydantic is a library for validating and shaping data — specifically, checking that Python objects (usually built from JSON) match a schema you define, and converting/rejecting them accordingly
 
 
@@ -53,6 +53,17 @@ class PropertyResponse(BaseModel):
     opening_bid: float | None
     reserve_price: float | None = None
     emd: float | None = None
+    increment_amount: float | None = None
+    auction_start: datetime | None = None
+    auction_end: datetime | None = None
+    possession_type: str | None = None
+    property_sub_type: str | None = None
+    district: str | None = None
+    state: str | None = None
+    pincode: str | None = None
+    bank_name: str | None = None
+    branch_name: str | None = None
+    raw_status: str | None = None
     estimated_value: float | None
     property_type: str | None
     survey_number: str | None = None
@@ -299,6 +310,7 @@ class RAGRequest(BaseModel):
     limit: int = 6
     # None = auto (investment questions / property_id → multi-source)
     multi_source: bool | None = None
+    conversation_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CitationResponse(BaseModel):
@@ -385,4 +397,35 @@ class StructuredExtractionResponse(BaseModel):
     validation_errors: list[str]
     valid: bool
     method: str
+
+
+class UserPreferenceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int | None = None
+    user_id: int
+    state: str | None = None
+    district: str | None = None
+    city: str | None = None
+    locality: str | None = None
+    property_types: list[str] = ["residential"]
+    min_reserve_price: float | None = None
+    max_reserve_price: float | None = None
+    preferred_banks: list[str] = []
+    onboarding_completed: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class UserPreferenceUpdate(BaseModel):
+    state: str | None = None
+    district: str | None = None
+    city: str | None = None
+    locality: str | None = None
+    property_types: list[str] = ["residential"]
+    min_reserve_price: float | None = None
+    max_reserve_price: float | None = None
+    preferred_banks: list[str] = []
+    onboarding_completed: bool = True
+
 

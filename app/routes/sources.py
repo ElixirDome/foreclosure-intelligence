@@ -19,7 +19,16 @@ from app.security import require_role
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
-_ALLOWED_RULES = {"item_selector", "reserve", "emd", "limit"}
+_ALLOWED_RULES = {
+    "item_selector",
+    "reserve",
+    "emd",
+    "limit",
+    "location",
+    "city",
+    "city_id",
+    "max_pages",
+}
 _REGEX_RULES = {"reserve", "emd"}
 
 
@@ -92,11 +101,57 @@ class SourceResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+DEFAULT_SOURCES = [
+    {
+        "name": "Punjab National Bank E-Auctions",
+        "base_url": "https://www.pnb.bank.in/EAuction.aspx",
+        "adapter_key": "pnb",
+        "rules": {},
+    },
+    {
+        "name": "BaankNet Auction Portal",
+        "base_url": "https://baanknet.com",
+        "adapter_key": "banknet",
+        "rules": {},
+    },
+]
+
+
+def _ensure_default_sources(db: Session) -> None:
+    changed = False
+    for src in DEFAULT_SOURCES:
+        existing = (
+            db.query(ConnectedSource)
+            .filter(
+                (ConnectedSource.base_url == src["base_url"])
+                | (ConnectedSource.adapter_key == src["adapter_key"])
+            )
+            .first()
+        )
+        if not existing:
+            db.add(
+                ConnectedSource(
+                    name=src["name"],
+                    base_url=src["base_url"],
+                    adapter_key=src["adapter_key"],
+                    config_json={"rules": src.get("rules", {})},
+                    enabled=True,
+                )
+            )
+            changed = True
+    if changed:
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+
+
 @router.get("/", response_model=list[SourceResponse])
 def list_sources(
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_role("admin")),
 ):
+    _ensure_default_sources(db)
     return db.query(ConnectedSource).order_by(ConnectedSource.id).all()
 
 
@@ -173,3 +228,21 @@ def run_source(
     db.commit()
     enqueue_connected_source(source_id, current_user.id)
     return {"status": "queued", "source_id": source_id}
+
+
+class DiscoverSourceRequest(BaseModel):
+    url_or_name: str = Field(min_length=1, max_length=2048)
+
+
+@router.post("/discover")
+def discover_source_endpoint(
+    body: DiscoverSourceRequest,
+    _current_user: User = Depends(require_role("admin")),
+):
+    """
+    Autonomously discovers auction listing endpoints, validates routes,
+    and returns discovery evidence and listing previews.
+    """
+    from app.services.source_discovery import discover_auction_source
+    return discover_auction_source(body.url_or_name)
+

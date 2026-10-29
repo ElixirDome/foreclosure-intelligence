@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_llm_provider
+from app.services.llm import LocalLLMProvider
 from app.models import Document, DocumentChunk
 from app.schemas import (
     DocumentResponse,
@@ -23,6 +25,7 @@ from app.schemas import (
     InvestmentAnalysisRequest,
 )
 from app.services.rag import answer_question, analyze_investment
+from app.services.analyst import process_analyst_turn
 from app.services.retrieval import index_document_embeddings, retrieve
 from app.services.structured_extraction import extract_from_document
 
@@ -197,24 +200,91 @@ def _rag_to_response(result) -> RAGResponse:
 
 
 @router.post("/rag", response_model=RAGResponse)
-def rag_answer(body: RAGRequest, db: Session = Depends(get_db)):
+def rag_answer(
+    body: RAGRequest,
+    db: Session = Depends(get_db),
+    provider: LocalLLMProvider = Depends(get_llm_provider),
+):
     """
-    Multi-source RAG.
-
-    Investment-style questions (or property_id) automatically pull
-    documents + properties + evidence + comparables + valuations + deal signals.
+    Unified Research Analyst & Multi-source RAG.
+    Handles valuation explanation, status inquiries, discovery, onboarding, and multi-source RAG.
     """
-    result = answer_question(
-        db,
-        body.question,
-        mode=body.mode,
-        document_id=body.document_id,
+    analyst_res = process_analyst_turn(
+        db=db,
+        question=body.question,
         property_id=body.property_id,
-        limit=body.limit,
-        multi_source=body.multi_source,
-        provider=None,
+        provider=provider,
+        conversation_history=body.conversation_history,
+        mode=body.mode,
     )
-    return _rag_to_response(result)
+    structured = None
+    if analyst_res.structured is not None:
+        structured = StructuredAnalysisResponse(
+            summary=analyst_res.structured.summary,
+            strengths=analyst_res.structured.strengths,
+            risks=analyst_res.structured.risks,
+            due_diligence=analyst_res.structured.due_diligence,
+            recommendation=analyst_res.structured.recommendation,
+            deal_score=analyst_res.structured.deal_score,
+            deal_rating=analyst_res.structured.deal_rating,
+        )
+
+    citations: list[CitationResponse] = []
+    seen_c_keys: set[tuple] = set()
+    for c in analyst_res.citations:
+        c_key = (c.kind, c.document_id, c.page_number, c.source_id)
+        if c_key not in seen_c_keys:
+            seen_c_keys.add(c_key)
+            citations.append(
+                CitationResponse(
+                    kind=c.kind,
+                    source_id=c.source_id,
+                    title=c.title,
+                    excerpt=c.excerpt,
+                    score=c.score,
+                    document_id=c.document_id,
+                    chunk_id=c.chunk_id,
+                    page_number=c.page_number,
+                    property_id=c.property_id,
+                    filename=c.filename,
+                    source_name=c.source_name,
+                )
+            )
+
+    seen_action_urls: set[str] = set()
+    for act in analyst_res.action_links:
+        if act["url"] not in seen_action_urls:
+            seen_action_urls.add(act["url"])
+            citations.append(
+                CitationResponse(
+                    kind="action",
+                    source_id=act["url"],
+                    title=act["title"],
+                    excerpt=act["url"],
+                    score=1.0,
+                    property_id=analyst_res.property_id,
+                )
+            )
+
+    prop_ids = []
+    if analyst_res.property_id:
+        prop_ids.append(analyst_res.property_id)
+    for c in analyst_res.citations:
+        if c.property_id and c.property_id not in prop_ids:
+            prop_ids.append(c.property_id)
+
+    return RAGResponse(
+        question=analyst_res.question,
+        answer=analyst_res.answer,
+        citations=citations,
+        structured=structured,
+        context_kinds=["analyst", analyst_res.intent],
+        property_ids=prop_ids,
+        document_ids=[c.document_id for c in analyst_res.citations if c.document_id],
+        chunks_used=len(citations),
+        method=analyst_res.intent,
+        mode=body.mode,
+    )
 
 
 @router.post("/rag/investment", response_model=RAGResponse)

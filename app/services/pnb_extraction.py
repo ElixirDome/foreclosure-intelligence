@@ -22,7 +22,7 @@ def _parse_date(text: str):
 def _parse_area_sqft(text: str):
     # Square metres
     match = re.search(
-        r"([\d,.]+)\s*Sq\.?\s*M(?:tr|eter|etre)?",
+        r"(\d[\d,.]*)\s*Sq\.?\s*M(?:tr|eter|etre)?",
         text,
         re.IGNORECASE,
     )
@@ -33,7 +33,7 @@ def _parse_area_sqft(text: str):
 
     # Square feet
     match = re.search(
-        r"([\d,.]+)\s*Sq\.?\s*(?:Ft|Feet)",
+        r"(\d[\d,.]*)\s*Sq\.?\s*(?:Ft|Feet)",
         text,
         re.IGNORECASE,
     )
@@ -43,7 +43,7 @@ def _parse_area_sqft(text: str):
 
     # Square yards
     match = re.search(
-        r"([\d,.]+)\s*(?:Sq\.?\s*Yards?|Square\s*Yards?)",
+        r"(\d[\d,.]*)\s*(?:Sq\.?\s*Yards?|Square\s*Yards?)",
         text,
         re.IGNORECASE,
     )

@@ -14,6 +14,7 @@ export async function askRag(params: {
   mode?: "keyword" | "vector" | "hybrid";
   multi_source?: boolean | null;
   limit?: number;
+  conversation_history?: Array<{ role: string; text?: string; content?: string }>;
 }): Promise<RAGResponse> {
   const { data } = await api.post<RAGResponse>("/documents/rag", {
     question: params.question,
@@ -22,6 +23,7 @@ export async function askRag(params: {
     mode: params.mode ?? "hybrid",
     multi_source: params.multi_source ?? null,
     limit: params.limit ?? 6,
+    conversation_history: params.conversation_history ?? [],
   });
   return data;
 }
