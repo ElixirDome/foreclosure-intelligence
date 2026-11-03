@@ -26,6 +26,7 @@ from app.models import Document, DocumentChunk
 from app.services.bm25 import BM25Ranker
 from app.services.embeddings import (
     EMBEDDING_VERSION,
+    embedding_model_id,
     cosine_similarity,
     embed_text,
     tokenize,
@@ -102,6 +103,7 @@ def index_chunk_embedding(chunk: DocumentChunk) -> None:
     meta = dict(chunk.metadata_json or {})
     meta["embedding"] = embed_text(chunk.text)
     meta["embedding_version"] = EMBEDDING_VERSION
+    meta["embedding_model"] = embedding_model_id()
     chunk.metadata_json = meta
 
 
@@ -207,12 +209,18 @@ def vector_search(
     for chunk, doc in q.all():
         meta = chunk.metadata_json or {}
         emb = meta.get("embedding")
-        if not emb or meta.get("embedding_version") != EMBEDDING_VERSION:
-            # Rebuild legacy or missing vectors whose old hashes are process-randomized.
+        active_model = embedding_model_id()
+        if (
+            not emb
+            or meta.get("embedding_version") != EMBEDDING_VERSION
+            or meta.get("embedding_model") != active_model
+        ):
+            # Rebuild legacy vectors and vectors created by a different backend/model.
             emb = embed_text(chunk.text)
             meta = dict(meta)
             meta["embedding"] = emb
             meta["embedding_version"] = EMBEDDING_VERSION
+            meta["embedding_model"] = embedding_model_id()
             chunk.metadata_json = meta
 
         score = cosine_similarity(query_vec, emb)

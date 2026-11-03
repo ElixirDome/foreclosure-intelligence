@@ -15,7 +15,7 @@ import subprocess
 import sys
 from unittest.mock import patch
 import pytest
-from app.services.embeddings import EMBEDDING_VERSION
+from app.services.embeddings import EMBEDDING_VERSION, embedding_model_id
 
 from app.models import Document, DocumentChunk
 from app.services.bm25 import BM25Ranker
@@ -41,7 +41,11 @@ class TestStableEmbeddings:
         )
         outputs = []
         for seed in ("1", "98765"):
-            env = dict(os.environ, PYTHONHASHSEED=seed)
+            env = dict(
+                os.environ,
+                PYTHONHASHSEED=seed,
+                OLLAMA_EMBEDDING_MODEL="",
+            )
             outputs.append(
                 subprocess.check_output(
                     [sys.executable, "-c", snippet],
@@ -50,7 +54,8 @@ class TestStableEmbeddings:
                 ).strip()
             )
         assert outputs[0] == outputs[1]
-        assert EMBEDDING_VERSION == 2
+        assert EMBEDDING_VERSION == 3
+        assert embedding_model_id() == "stable-hash-v3"
 
 
 class TestMultiQueryGeneration:

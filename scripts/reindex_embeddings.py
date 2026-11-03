@@ -6,7 +6,11 @@ Run from the repository root:
 
 from app.database import SessionLocal
 from app.models import DocumentChunk
-from app.services.embeddings import EMBEDDING_VERSION, embed_text
+from app.services.embeddings import (
+    EMBEDDING_VERSION,
+    embed_text,
+    embedding_model_id,
+)
 
 
 def main(batch_size: int = 500) -> int:
@@ -28,6 +32,7 @@ def main(batch_size: int = 500) -> int:
                 metadata = dict(chunk.metadata_json or {})
                 metadata["embedding"] = embed_text(chunk.text)
                 metadata["embedding_version"] = EMBEDDING_VERSION
+                metadata["embedding_model"] = embedding_model_id()
                 chunk.metadata_json = metadata
                 updated += 1
                 last_id = chunk.id
