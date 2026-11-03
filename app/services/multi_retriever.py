@@ -77,6 +77,17 @@ class MultiSourceContext:
                 f"{item.text}"
             )
             if used + len(block) > max_chars:
+                remaining = max_chars - used
+                if remaining > 250:
+                    header = (
+                        f"[{i}] kind={item.kind} id={item.source_id} "
+                        f"score={item.score:.3f}\ntitle: {item.title}\n"
+                    )
+                    body_allowance = remaining - len(header) - 20
+                    if body_allowance > 50:
+                        blocks.append(
+                            header + item.text[:body_allowance] + "\n... [truncated]"
+                        )
                 break
             blocks.append(block)
             used += len(block)
@@ -263,6 +274,7 @@ def retrieve_evidence_context(
     db: Session,
     *,
     property_ids: list[int],
+    question: str | None = None,
     limit: int = 20,
 ) -> list[ContextItem]:
     if not property_ids:
@@ -282,13 +294,23 @@ def retrieve_evidence_context(
             f"page={e.page_number}\nsource={e.source_text}\n"
             f"method={e.extraction_method}\nconfidence={e.confidence}"
         )
+        if question:
+            match = _score_text_match(
+                question,
+                f"{e.field} {e.value} {e.source_text or ''}",
+            )
+            # Relevancy-ranked: base 0.6 + up to 0.4 based on match
+            score = round(0.6 + 0.4 * match, 3)
+        else:
+            score = 0.85
+
         items.append(
             ContextItem(
                 kind="evidence",
                 source_id=f"evidence:{e.id}",
                 title=f"{e.field} = {e.value}",
                 text=text,
-                score=0.85,
+                score=score,
                 metadata={
                     "property_id": e.property_id,
                     "document_id": e.document_id,
@@ -298,6 +320,8 @@ def retrieve_evidence_context(
                 },
             )
         )
+    if question:
+        items.sort(key=lambda x: x.score, reverse=True)
     return items
 
 
@@ -506,7 +530,11 @@ def build_multi_source_context(
 
     if include_evidence and property_ids:
         items.extend(
-            retrieve_evidence_context(db, property_ids=property_ids)
+            retrieve_evidence_context(
+                db,
+                property_ids=property_ids,
+                question=question,
+            )
         )
 
     if include_comparables:

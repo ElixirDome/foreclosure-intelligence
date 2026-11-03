@@ -216,6 +216,9 @@ def rag_answer(
         provider=provider,
         conversation_history=body.conversation_history,
         mode=body.mode,
+        document_id=body.document_id,
+        limit=body.limit,
+        multi_source=body.multi_source,
     )
     structured = None
     if analyst_res.structured is not None:

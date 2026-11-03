@@ -195,3 +195,96 @@ def test_property_ai_analysis(client, fake_llm_provider):
     assert data["risks"] == ["Foreclosure risk"]
     assert data["due_diligence"] == ["Review foreclosure documents"]
     assert data["recommendation"] == "Investigate further."
+
+
+def test_residential_filter_excludes_commercial_properties(client, db):
+    # Create residential property
+    res_resp = _create_property(
+        client,
+        address="101 Rose Avenue, Gurdaspur",
+        property_type="Residential Flat",
+        city="Gurdaspur",
+    )
+    assert res_resp.status_code == 201
+
+    # Create commercial property
+    comm_resp = _create_property(
+        client,
+        address="Commercial Complex Sector 4, Gurdaspur",
+        property_type="Commercial Shop",
+        city="Gurdaspur",
+    )
+    assert comm_resp.status_code == 201
+
+    # Query with property_type=residential
+    res_query = client.get("/properties/?property_type=residential&city=Gurdaspur")
+    assert res_query.status_code == 200
+    res_items = res_query.json()["items"]
+    res_types = [item["property_type"] for item in res_items]
+
+    # Verify no commercial property leaked into residential results
+    assert all("commercial" not in (t or "").lower() for t in res_types)
+    assert any("Rose Avenue" in item["address"] for item in res_items)
+    assert not any("Commercial Complex" in item["address"] for item in res_items)
+
+
+def test_location_and_property_type_combined_filtering(client, db):
+    _create_property(
+        client,
+        address="55 Palm Grove, Ghaziabad",
+        property_type="Residential House",
+        city="Ghaziabad",
+    )
+    _create_property(
+        client,
+        address="22 Mill Road, Amritsar",
+        property_type="Residential House",
+        city="Amritsar",
+    )
+
+    # Filter by city + residential
+    resp = client.get("/properties/?city=Ghaziabad&property_type=residential")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) >= 1
+    assert all(item["city"] == "Ghaziabad" for item in items if item.get("city"))
+    assert not any(item.get("city") == "Amritsar" for item in items)
+
+
+def test_get_properties_deal_score_reflects_valuation_confidence(client, db):
+    """SQL list deal score must adjust by valuation confidence, matching detail analysis."""
+    from app.models import Property, PropertyValuation
+    from datetime import date
+
+    prop = Property(
+        user_id=1,
+        address="99 Concourse Way, Gurdaspur",
+        city="Gurdaspur",
+        reserve_price=2000000.0,
+        foreclosure_status="scheduled",  # risk_level = 1 -> penalty = 5
+        property_key="99_concourse_way",
+    )
+    db.add(prop)
+    db.commit()
+
+    # Discount = (4M - 2M) / 4M * 100 = 50%
+    # Raw deal score = 50 - (1 * 5) = 45
+    # With confidence 0.8: adjusted = 45 * 0.8 = 36.0
+    val = PropertyValuation(
+        property_id=prop.id,
+        estimated_value=4000000.0,
+        valuation_method="residential_comparable_sales",
+        source="market_comparables",
+        confidence=0.8,
+        valuation_date=date.today(),
+    )
+    db.add(val)
+    db.commit()
+
+    resp = client.get(f"/properties/?search=Concourse")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["deal_score"] == pytest.approx(36.0)
+
+

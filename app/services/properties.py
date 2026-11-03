@@ -4,7 +4,7 @@ from math import ceil
 from datetime import date
 from app.models import Property, PropertyDocument, Document, PropertyValuation
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, or_, select
 
 from fastapi import HTTPException
 from app.schemas import PropertyCreate, ExtractedProperty
@@ -120,22 +120,26 @@ def save_extracted_properties(
 
 def get_properties(
     db: Session,
-    page: int,
-    limit: int,
-    search: str | None,
-    min_price: int | None,
-    max_price: int | None,
-    bedrooms: int | None,
-    sort_by: str,
-    order: str,
-    min_area: int | None,
-    max_area: int | None,
-    min_discount: float | None,
-    max_discount: float | None,
-    foreclosure_status: str | None,
-    auction_date_from: date | None,
-    auction_date_to: date | None,
+    page: int = 1,
+    limit: int = 20,
+    search: str | None = None,
+    min_price: int | float | None = None,
+    max_price: int | float | None = None,
+    bedrooms: int | None = None,
+    sort_by: str = "id",
+    order: str = "asc",
+    min_area: int | float | None = None,
+    max_area: int | float | None = None,
+    min_discount: float | None = None,
+    max_discount: float | None = None,
+    foreclosure_status: str | None = None,
+    auction_date_from: date | None = None,
+    auction_date_to: date | None = None,
     property_type: str | None = None,
+    city: str | None = None,
+    district: str | None = None,
+    locality: str | None = None,
+    **kwargs,
 ):
     """
     Query properties with calculated deal metrics.
@@ -192,7 +196,19 @@ def get_properties(
         - (risk_level * DEAL_SCORE_RISK_MULTIPLIER)
     )
 
-    deal_score = case(
+    trusted_confidence = (
+        select(PropertyValuation.confidence)
+        .where(
+            PropertyValuation.property_id == Property.id,
+            PropertyValuation.source == "market_comparables",
+            PropertyValuation.valuation_method == "residential_comparable_sales",
+        )
+        .order_by(PropertyValuation.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+    base_deal_score = case(
         (
             discount_percentage.is_(None),
             None,
@@ -206,6 +222,18 @@ def get_properties(
             100,
         ),
         else_=raw_deal_score,
+    )
+
+    deal_score = case(
+        (
+            base_deal_score.is_(None),
+            None,
+        ),
+        (
+            trusted_confidence.is_not(None),
+            func.round(base_deal_score * trusted_confidence, 2),
+        ),
+        else_=base_deal_score,
     ).label("deal_score")
 
     query = db.query(
@@ -215,10 +243,15 @@ def get_properties(
         trusted_estimate.label("trusted_estimated_value"),
     )
 
-    # Search
+    # Search across address, city, and locality
     if search:
+        search_term = f"%{search.strip()}%"
         query = query.filter(
-            Property.address.ilike(f"%{search.strip()}%")
+            or_(
+                Property.address.ilike(search_term),
+                Property.city.ilike(search_term),
+                Property.locality.ilike(search_term),
+            )
         )
 
     # Price filters
@@ -289,14 +322,51 @@ def get_properties(
 
     if property_type is not None:
         pt = property_type.strip().lower()
-        if pt in {"residential", "commercial"}:
+        if pt == "residential":
             query = query.filter(
-                func.lower(Property.property_type).ilike(f"%{pt}%")
+                or_(
+                    func.lower(Property.property_type).ilike("%residential%"),
+                    func.lower(Property.property_type).ilike("%flat%"),
+                    func.lower(Property.property_type).ilike("%apartment%"),
+                    func.lower(Property.property_type).ilike("%house%"),
+                    func.lower(Property.property_type).ilike("%villa%"),
+                    func.lower(Property.property_type).ilike("%duplex%"),
+                ),
+                ~func.lower(Property.property_type).ilike("%commercial%"),
+                ~func.lower(Property.property_type).ilike("%industrial%"),
+                ~func.lower(Property.property_type).ilike("%shop%"),
+                ~func.lower(Property.property_type).ilike("%office%"),
+                ~func.lower(Property.property_type).ilike("%factory%"),
+                ~func.lower(Property.property_type).ilike("%warehouse%"),
             )
-        else:
+        elif pt == "commercial":
+            query = query.filter(
+                or_(
+                    func.lower(Property.property_type).ilike("%commercial%"),
+                    func.lower(Property.property_type).ilike("%industrial%"),
+                    func.lower(Property.property_type).ilike("%shop%"),
+                    func.lower(Property.property_type).ilike("%office%"),
+                    func.lower(Property.property_type).ilike("%factory%"),
+                    func.lower(Property.property_type).ilike("%warehouse%"),
+                )
+            )
+        elif pt != "all":
             query = query.filter(
                 func.lower(Property.property_type) == pt
             )
+
+    # Location filters
+    if city:
+        query = query.filter(func.lower(Property.city).ilike(f"%{city.strip().lower()}%"))
+    if locality:
+        query = query.filter(func.lower(Property.locality).ilike(f"%{locality.strip().lower()}%"))
+    if district:
+        query = query.filter(
+            or_(
+                func.lower(Property.city).ilike(f"%{district.strip().lower()}%"),
+                func.lower(Property.address).ilike(f"%{district.strip().lower()}%"),
+            )
+        )
 
     # Pagination count
     total = query.count()
@@ -660,13 +730,37 @@ def get_property_summary(db: Session):
 
     residential = (
         db.query(func.count(Property.id))
-        .filter(func.lower(Property.property_type) == "residential")
+        .filter(
+            or_(
+                func.lower(Property.property_type).ilike("%residential%"),
+                func.lower(Property.property_type).ilike("%flat%"),
+                func.lower(Property.property_type).ilike("%house%"),
+                func.lower(Property.property_type).ilike("%apartment%"),
+                func.lower(Property.property_type).ilike("%villa%"),
+                func.lower(Property.property_type).ilike("%duplex%"),
+            ),
+            ~func.lower(Property.property_type).ilike("%commercial%"),
+            ~func.lower(Property.property_type).ilike("%industrial%"),
+            ~func.lower(Property.property_type).ilike("%shop%"),
+            ~func.lower(Property.property_type).ilike("%office%"),
+            ~func.lower(Property.property_type).ilike("%factory%"),
+            ~func.lower(Property.property_type).ilike("%warehouse%"),
+        )
         .scalar()
         or 0
     )
     commercial = (
         db.query(func.count(Property.id))
-        .filter(func.lower(Property.property_type) == "commercial")
+        .filter(
+            or_(
+                func.lower(Property.property_type).ilike("%commercial%"),
+                func.lower(Property.property_type).ilike("%industrial%"),
+                func.lower(Property.property_type).ilike("%shop%"),
+                func.lower(Property.property_type).ilike("%office%"),
+                func.lower(Property.property_type).ilike("%factory%"),
+                func.lower(Property.property_type).ilike("%warehouse%"),
+            )
+        )
         .scalar()
         or 0
     )

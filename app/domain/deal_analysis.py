@@ -19,16 +19,23 @@ FORECLOSURE_RISK_LEVELS = {
 
 def calculate_discount(
     estimated_value: float | None,
-    opening_bid: float | None,
+    reserve_price: float | None = None,
+    *,
+    opening_bid: float | None = None,
 ) -> tuple[float | None, float | None]:
-    """Return discount amount and discount percentage."""
+    """
+    Return discount amount and discount percentage against the benchmark price.
+    In Indian foreclosure auctions, the benchmark is the reserve_price.
+    Falls back to opening_bid if passed.
+    """
+    price = reserve_price if reserve_price is not None else opening_bid
     if estimated_value is None or estimated_value <= 0:
         return None, None
 
-    if opening_bid is None:
+    if price is None:
         return None, None
 
-    discount_amount = estimated_value - opening_bid
+    discount_amount = estimated_value - price
     discount_percentage = (
         discount_amount / estimated_value
     ) * 100
@@ -37,17 +44,17 @@ def calculate_discount(
 
 
 def calculate_price_per_sqft(
-    opening_bid: float | None,
+    price: float | None,
     area_sqft: float | None,
 ) -> float | None:
-    """Calculate opening-bid price per square foot."""
-    if opening_bid is None:
+    """Calculate price per square foot using reserve price or opening bid."""
+    if price is None:
         return None
 
     if area_sqft is None or area_sqft <= 0:
         return None
 
-    return opening_bid / area_sqft
+    return price / area_sqft
 
 
 def calculate_deal_score(

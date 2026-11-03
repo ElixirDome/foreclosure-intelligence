@@ -306,6 +306,10 @@ def save_ingested_properties(
 
     db.commit()
 
+    if saved or skipped:
+        from app.services.cache import cache
+        cache.invalidate_prefix("property:")
+
     # Emit real-time events strictly after successful database commit
     now = time.time()
     for prop in saved:

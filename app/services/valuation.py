@@ -268,15 +268,17 @@ def calculate_valuation_from_comparables(
         * area_sqft
     )
 
+    valid_comparables_count = len(price_per_sqft_values)
+
     confidence = calculate_valuation_confidence(
         price_per_sqft_values=price_per_sqft_values,
-        comparables_count=len(comparables),
+        comparables_count=valid_comparables_count,
     )
 
     return {
         "estimated_value": estimated_value,
         "median_price_per_sqft": median_price_per_sqft,
-        "comparables_used": len(comparables),
+        "comparables_used": valid_comparables_count,
         "confidence": confidence,
         "valuation_method": (
             "residential_comparable_sales"

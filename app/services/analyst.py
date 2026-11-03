@@ -48,6 +48,7 @@ class AnalystResponse:
     structured: StructuredAnalysis | None = None
     action_links: list[dict[str, str]] = field(default_factory=list)
     intent: str = "general"
+    chunks_used: int = 0
 
 
 def process_analyst_turn(
@@ -58,6 +59,9 @@ def process_analyst_turn(
     provider: Any | None = None,
     conversation_history: list[dict[str, Any]] | None = None,
     mode: str = "hybrid",
+    document_id: int | None = None,
+    limit: int = 6,
+    multi_source: bool | None = None,
 ) -> AnalystResponse:
     """Dispatches user query to specific domain tools or multi-source RAG."""
     # Load user location preferences if available
@@ -187,8 +191,11 @@ def process_analyst_turn(
         db=db,
         question=q_clean,
         property_id=resolved_prop_id,
+        document_id=document_id,
         mode=mode,
         provider=provider,
+        limit=limit,
+        multi_source=multi_source,
     )
 
     action_links = []
@@ -214,6 +221,7 @@ def process_analyst_turn(
         structured=rag_result.structured,
         action_links=action_links,
         intent="investment_analysis" if resolved_prop_id else "rag_general",
+        chunks_used=rag_result.chunks_used,
     )
 
 

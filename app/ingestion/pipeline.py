@@ -13,6 +13,7 @@ when property parsing is incomplete or fails later.
 
 from datetime import datetime, timezone
 import logging
+import time
 import traceback
 
 from sqlalchemy.orm import Session
@@ -21,6 +22,7 @@ from app.ingestion.base import SourceAdapter
 from app.ingestion.document_ingest import ingest_document, ingest_documents
 from app.ingestion.save import save_ingested_properties
 from app.models import IngestionRun
+from app.services.live_events import broker
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,9 @@ def run_ingestion(
     document is stored through the universal document ingest path
     (text + chunks) inside save_ingested_properties.
     """
+    t_start = time.time()
+    latency_metrics = {}
+
     ingestion_run = IngestionRun(
         source_name=adapter.__class__.__name__,
         started_at=datetime.now(timezone.utc),
@@ -111,13 +116,40 @@ def run_ingestion(
     db.commit()
     db.refresh(ingestion_run)
 
+    broker.publish(
+        "ingestion_status",
+        {
+            "run_id": ingestion_run.id,
+            "source": adapter.__class__.__name__,
+            "stage": "discovery_started",
+            "status": "running",
+            "timestamp": time.time(),
+        },
+    )
+
     try:
+        t0 = time.time()
         raw_items = adapter.fetch()
+        latency_metrics["discovery_and_fetch_ms"] = round((time.time() - t0) * 1000)
+
+        broker.publish(
+            "ingestion_status",
+            {
+                "run_id": ingestion_run.id,
+                "source": adapter.__class__.__name__,
+                "stage": "documents_discovered",
+                "status": "running",
+                "items_found": len(raw_items),
+                "discovery_time_ms": latency_metrics["discovery_and_fetch_ms"],
+                "timestamp": time.time(),
+            },
+        )
 
         extracted_items = []
         document_only_items = []
         extraction_errors = []
 
+        t1 = time.time()
         for item in raw_items:
             try:
                 extracted = adapter.extract(item)
@@ -138,8 +170,8 @@ def run_ingestion(
                 pages = item.get("pages")
             pages = pages or getattr(item, "pages", None)
 
-            if extracted is None:
-                # Keep source documents even when property extraction fails.
+            if not extracted:
+                # Keep source documents even when property extraction fails or returns no properties.
                 document_only_items.extend(
                     (document, pages) for document in documents
                 )
@@ -173,6 +205,23 @@ def run_ingestion(
                     "pages": pages,
                 })
 
+        latency_metrics["extraction_ms"] = round((time.time() - t1) * 1000)
+
+        broker.publish(
+            "ingestion_status",
+            {
+                "run_id": ingestion_run.id,
+                "source": adapter.__class__.__name__,
+                "stage": "extraction_completed",
+                "status": "running",
+                "items_extracted": len(extracted_items),
+                "extraction_errors": len(extraction_errors),
+                "extraction_time_ms": latency_metrics["extraction_ms"],
+                "timestamp": time.time(),
+            },
+        )
+
+        t2 = time.time()
         save_result = save_ingested_properties(
             db=db,
             properties=extracted_items,
@@ -187,37 +236,86 @@ def run_ingestion(
         if document_only_count:
             db.commit()
 
-        ingestion_run.finished_at = datetime.now(timezone.utc)
-        ingestion_run.status = "success"
-        ingestion_run.items_found = len(raw_items)
+        latency_metrics["commit_time_ms"] = round((time.time() - t2) * 1000)
+        latency_metrics["total_time_ms"] = round((time.time() - t_start) * 1000)
 
+        # Distinguish zero property extraction vs real success
+        if len(raw_items) > 0 and len(extracted_items) == 0:
+            final_status = "zero_properties_extracted"
+        elif len(raw_items) == 0:
+            final_status = "no_items_found"
+        elif len(extraction_errors) > 0:
+            final_status = "partial_success"
+        else:
+            final_status = "success"
+
+        ingestion_run.finished_at = datetime.now(timezone.utc)
+        ingestion_run.status = final_status
+        ingestion_run.items_found = len(raw_items)
+        ingestion_run.items_created = len(save_result["saved"])
+        ingestion_run.items_skipped = len(save_result["skipped"])
         db.commit()
+
+        broker.publish(
+            "ingestion_status",
+            {
+                "run_id": ingestion_run.id,
+                "source": adapter.__class__.__name__,
+                "stage": "completed",
+                "status": final_status,
+                "items_found": len(raw_items),
+                "items_extracted": len(extracted_items),
+                "items_saved": len(save_result["saved"]),
+                "items_skipped": len(save_result["skipped"]),
+                "documents_without_property": document_only_count,
+                "extraction_errors": extraction_errors,
+                "latency": latency_metrics,
+                "timestamp": time.time(),
+            },
+        )
 
         return {
             "ingestion_run_id": ingestion_run.id,
+            "status": final_status,
             "items_found": len(raw_items),
             "items_extracted": len(extracted_items),
             "saved": save_result["saved"],
             "skipped": save_result["skipped"],
             "documents_ingested_without_property": document_only_count,
             "extraction_errors": extraction_errors,
+            "latency": latency_metrics,
         }
 
     except Exception as exc:
-
         traceback.print_exc()
 
+        latency_metrics["total_time_ms"] = round((time.time() - t_start) * 1000)
         ingestion_run.finished_at = datetime.now(timezone.utc)
         ingestion_run.status = "failed"
         ingestion_run.error_message = str(exc)
 
         db.commit()
 
+        broker.publish(
+            "ingestion_status",
+            {
+                "run_id": ingestion_run.id,
+                "source": adapter.__class__.__name__,
+                "stage": "failed",
+                "status": "failed",
+                "error": str(exc),
+                "latency": latency_metrics,
+                "timestamp": time.time(),
+            },
+        )
+
         return {
             "ingestion_run_id": ingestion_run.id,
+            "status": "failed",
             "items_found": 0,
             "items_extracted": 0,
             "saved": [],
             "skipped": [],
             "error": str(exc),
+            "latency": latency_metrics,
         }
