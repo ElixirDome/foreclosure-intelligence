@@ -451,6 +451,7 @@ def get_properties(
             "auction_id": property.auction_id,
             "property_images": property.property_images or [],
             "listing_url": property.listing_url,
+            "extra_data": property.extra_data or {},
             "raw_status": property.raw_status,
             "discount_percentage": (
                 float(discount)

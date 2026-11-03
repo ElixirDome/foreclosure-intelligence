@@ -71,6 +71,7 @@ class PropertyResponse(BaseModel):
     inspection_end: datetime | None = None
     emd_deadline: datetime | None = None
     listing_url: str | None = None
+    extra_data: dict[str, Any] | None = None
     estimated_value: float | None
     property_type: str | None
     survey_number: str | None = None

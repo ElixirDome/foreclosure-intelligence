@@ -66,6 +66,7 @@ interface Property {
   inspection_start?: string | null; inspection_end?: string | null; listing_url?: string | null;
   district?: string | null; state?: string | null; pincode?: string | null;
   property_sub_type?: string | null; increment_amount?: number | null;
+  extra_data?: Record<string, unknown> | null;
 }
 interface PropertyAnalysis {
   estimated_value: number | null;
@@ -358,6 +359,13 @@ function PropertyDetails() {
             <div><strong>EMD deadline</strong><span>{property.emd_deadline ? new Date(property.emd_deadline).toLocaleString("en-IN") : "Not specified"}</span></div>
             <div><strong>Inspection window</strong><span>{property.inspection_start || property.inspection_end ? `${property.inspection_start ? new Date(property.inspection_start).toLocaleString("en-IN") : "—"} – ${property.inspection_end ? new Date(property.inspection_end).toLocaleString("en-IN") : "—"}` : "Not specified"}</span></div>
             <div><strong>Property subtype</strong><span>{property.property_sub_type || "Not specified"}</span></div>
+            <div><strong>Listing title</strong><span>{String(property.extra_data?.propertyHeading ?? "Not provided")}</span></div>
+            <div><strong>Project</strong><span>{String(property.extra_data?.projectName ?? "Not specified")}</span></div>
+            <div><strong>Furnishing</strong><span>{String(property.extra_data?.furnishedStatus ?? "Not specified")}</span></div>
+            <div><strong>Carpet area</strong><span>{property.extra_data?.carpetAreaSqft != null ? `${String(property.extra_data.carpetAreaSqft)} sq ft` : "Not specified"}</span></div>
+            <div><strong>Built-up area</strong><span>{property.extra_data?.builtupAreaSqft != null ? `${String(property.extra_data.builtupAreaSqft)} sq ft` : "Not specified"}</span></div>
+            <div><strong>Type of action</strong><span>{String(property.extra_data?.typeOfAction ?? "Not specified")}</span></div>
+            <div><strong>Branch address</strong><span>{String(property.extra_data?.branchAddress ?? "Not provided")}</span></div>
           </div>
           {property.listing_url && <p><a href={property.listing_url} target="_blank" rel="noreferrer">Open original bank listing ↗</a></p>}
         </section>
