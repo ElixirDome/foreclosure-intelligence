@@ -1,4 +1,8 @@
-"""Rebuild stored chunk vectors after the deterministic embedding change.
+"""Rebuild stored chunk vectors after an embedding backend/model change.
+
+Set OLLAMA_EMBEDDING_MODEL (for example, nomic-embed-text) before running
+to build semantic vectors with Ollama. Without it, the stable local fallback
+is used.
 
 Run from the repository root:
     python -m scripts.reindex_embeddings

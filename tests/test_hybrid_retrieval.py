@@ -55,7 +55,6 @@ class TestStableEmbeddings:
             )
         assert outputs[0] == outputs[1]
         assert EMBEDDING_VERSION == 3
-        assert embedding_model_id() == "stable-hash-v3"
 
 
 class TestMultiQueryGeneration:
