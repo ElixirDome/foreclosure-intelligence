@@ -213,6 +213,31 @@ class BankNetSourceAdapter(SourceAdapter):
             or id(source)
         )
 
+    @staticmethod
+    def _extract_image_urls(source: dict) -> list[str]:
+        """Normalize known BankNet photo fields; never fabricate image URLs."""
+        candidates = []
+        for key in ("propertyImages", "propertyImage", "propertyImageList", "imageUrls", "images", "propertyPhotos", "photoGallery", "imagePath", "imageUrl", "propertyPhoto"):
+            value = source.get(key)
+            if value:
+                candidates.extend(value if isinstance(value, list) else [value])
+        urls: list[str] = []
+        for item in candidates:
+            if isinstance(item, dict):
+                item = item.get("url") or item.get("imageUrl") or item.get("filepath") or item.get("filePath") or item.get("path") or item.get("src")
+            if not isinstance(item, str):
+                continue
+            value = item.strip()
+            if not value:
+                continue
+            if value.startswith("//"):
+                value = "https:" + value
+            elif not value.startswith(("https://", "http://")):
+                value = f"{CDN_BASE}/{value.lstrip('/')}"
+            if value.startswith("https://") and value not in urls:
+                urls.append(value)
+        return urls[:12]
+
     def extract(self, item: dict) -> dict | None:
         source = item.get("_source") if isinstance(item, dict) else None
         if not isinstance(source, dict):
@@ -290,12 +315,19 @@ class BankNetSourceAdapter(SourceAdapter):
 
         unique = source.get("propertyUniqueId")
 
+        inspection_start = self._parse_datetime(source.get("inspectionFrom"))
+        inspection_end = self._parse_datetime(source.get("inspectionTo"))
+        emd_deadline = self._parse_datetime(source.get("emdSubmissionDeadline"))
+        property_images = self._extract_image_urls(source)
+        property_detail_id = source.get("propertyDetailId")
+        listing_url = f"https://baanknet.com/view-property/{property_detail_id}" if property_detail_id else "https://baanknet.com/property-listing"
         extra_data = {
             "inspectionFrom": source.get("inspectionFrom"),
             "inspectionTo": source.get("inspectionTo"),
             "emdSubmissionDeadline": source.get("emdSubmissionDeadline"),
-            "propertyDetailId": source.get("propertyDetailId"),
+            "propertyDetailId": property_detail_id,
             "auctionId": source.get("auctionId"),
+            "propertyImages": property_images,
             "carpetAreaSqft": carpet_area,
             "builtupAreaSqft": builtup_area,
             "rawAuctionStatus": raw_status,
@@ -324,8 +356,13 @@ class BankNetSourceAdapter(SourceAdapter):
             "survey_number": str(unique) if unique else None,
             "bank_name": source.get("propertyBankName"),
             "branch_name": source.get("branchName"),
-            "property_unique_id": unique,
-            "auction_id": source.get("auctionId"),
+            "property_unique_id": str(unique) if unique is not None else None,
+            "auction_id": str(source.get("auctionId")) if source.get("auctionId") is not None else None,
+            "property_images": property_images,
+            "inspection_start": inspection_start,
+            "inspection_end": inspection_end,
+            "emd_deadline": emd_deadline,
+            "listing_url": listing_url,
             "possession": source.get("propertyPossessionType"),
             "extra_data": extra_data,
         }

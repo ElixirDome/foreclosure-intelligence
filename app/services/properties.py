@@ -434,7 +434,24 @@ def get_properties(
                 else None
             ),
             "property_type": property.property_type,
+            "property_sub_type": property.property_sub_type,
             "survey_number": property.survey_number,
+            "district": property.district,
+            "state": property.state,
+            "pincode": property.pincode,
+            "bank_name": property.bank_name,
+            "branch_name": property.branch_name,
+            "possession_type": property.possession_type,
+            "auction_start": property.auction_start,
+            "auction_end": property.auction_end,
+            "emd_deadline": property.emd_deadline,
+            "inspection_start": property.inspection_start,
+            "inspection_end": property.inspection_end,
+            "property_unique_id": property.property_unique_id,
+            "auction_id": property.auction_id,
+            "property_images": property.property_images or [],
+            "listing_url": property.listing_url,
+            "raw_status": property.raw_status,
             "discount_percentage": (
                 float(discount)
                 if discount is not None

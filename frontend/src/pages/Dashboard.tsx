@@ -32,6 +32,11 @@ interface Property {
   discount_percentage: number | null;
   deal_score: number | null;
   sources?: PropertySource[];
+  bank_name?: string | null; branch_name?: string | null; possession_type?: string | null;
+  property_unique_id?: string | null; auction_id?: string | null; property_images?: string[];
+  auction_start?: string | null; auction_end?: string | null; emd_deadline?: string | null;
+  inspection_start?: string | null; inspection_end?: string | null; listing_url?: string | null;
+  district?: string | null; state?: string | null;
 }
 
 interface PropertyResponse {
@@ -905,168 +910,49 @@ function Dashboard() {
             </div>
           )}
 
-          {/* Instagram-Style Feed Cards */}
-          <div className="ig-feed">
+          {/* Bank-auction marketplace listings */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 340px), 1fr))", gap: 20 }}>
             {displayedProperties.map((property) => {
-              const bankName =
-                property.sources && property.sources.length > 0 && property.sources[0].source_name
-                  ? property.sources[0].source_name.toUpperCase()
-                  : "BANKNET AUCTION";
-              const locationText = [property.locality, property.city].filter(Boolean).join(", ");
-              const hasPdf = property.sources?.some(
-                (s) =>
-                  (s.filename && s.filename.toLowerCase().endsWith(".pdf")) ||
-                  (s.source_url && s.source_url.toLowerCase().includes(".pdf")) ||
-                  (s.document_type && s.document_type.toLowerCase().includes("notice"))
-              );
+              const bankName = property.bank_name || property.sources?.[0]?.source_name || "Bank auction";
+              const locationText = [property.locality, property.city, property.district, property.state].filter(Boolean).join(", ");
               const isFavorited = favorites.includes(property.id);
               const isNewlyAdded = justAddedIds.includes(property.id);
-
+              const image = property.property_images?.[0];
+              const officialUrl = property.listing_url || property.sources?.find((source) => source.source_url)?.source_url;
+              const money = (value: number | null | undefined) => value == null ? "Not disclosed" : `₹${Number(value).toLocaleString("en-IN")}`;
+              const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleString("en-IN", { dateStyle: "medium", ...(value.includes("T") ? { timeStyle: "short" as const } : {}) }) : "Not specified";
               return (
-                <article className={`ig-card ${isNewlyAdded ? "highlight-new" : ""}`} key={property.id}>
-                  {/* Card Header (User/Bank row with Heart button) */}
-                  <div className="ig-card-header">
-                    <div className="ig-card-author">
-                      <div className="ig-avatar-ring">
-                        <div className="ig-avatar-inner">
-                          🏦
-                        </div>
-                      </div>
-                      <div className="ig-author-meta">
-                        <h4>{bankName}</h4>
-                        <span>
-                          {property.auction_date ? `📅 Auction: ${property.auction_date}` : "Upcoming Auction"}
-                          {property.foreclosure_status ? ` · ${property.foreclosure_status.toUpperCase()}` : ""}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      {isNewlyAdded && (
-                        <span className="ig-just-added-badge">
-                          <span>✨</span> JUST ADDED
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        className={`ig-heart-btn ${isFavorited ? "favorited" : ""}`}
-                        onClick={(e) => toggleFavorite(property.id, e)}
-                        title={isFavorited ? "Remove from favorites" : "Save to favorites"}
-                      >
-                        {isFavorited ? "❤️" : "🤍"}
-                      </button>
-                    </div>
+                <article key={property.id} style={{ overflow: "hidden", border: "1px solid var(--border-subtle)", borderRadius: 14, background: "var(--bg-card)", color: "var(--text-primary)", display: "flex", flexDirection: "column", minWidth: 0 }}>
+                  <div style={{ position: "relative", height: 220, background: "var(--bg-input)" }}>
+                    {image ? <img src={image} alt={property.address} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", color: "var(--text-muted)", gap: 6 }}><span style={{ fontSize: 42 }}>🏠</span><span>Property image not provided by source</span></div>}
+                    <span style={{ position: "absolute", top: 12, left: 12, background: "rgba(15,23,42,.88)", color: "#fff", padding: "5px 10px", borderRadius: 6, fontSize: 12, fontWeight: 700 }}>{property.foreclosure_status || "Status unavailable"}</span>
+                    <button type="button" onClick={(event) => toggleFavorite(property.id, event)} aria-label={isFavorited ? "Remove saved property" : "Save property"} style={{ position: "absolute", top: 10, right: 10, border: 0, borderRadius: "50%", width: 38, height: 38, background: "rgba(15,23,42,.88)", color: "#fff", cursor: "pointer", fontSize: 18 }}>{isFavorited ? "♥" : "♡"}</button>
+                    {isNewlyAdded && <span style={{ position: "absolute", bottom: 10, left: 12, background: "#166534", color: "#fff", padding: "4px 8px", borderRadius: 5, fontSize: 11 }}>JUST ADDED</span>}
                   </div>
-
-                  {/* Financial Hero Banner */}
-                  <div className="ig-card-hero-banner">
-                    <div className="ig-price-block">
-                      <span className="ig-price-label">Reserve Price</span>
-                      <div className="ig-reserve-price">
-                        {property.reserve_price != null
-                          ? `₹${property.reserve_price.toLocaleString("en-IN")}`
-                          : "Price on Application"}
-                      </div>
+                  <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+                    <div><div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 700 }}>{bankName}{property.branch_name ? ` · ${property.branch_name}` : ""}</div><h3 style={{ fontSize: 17, lineHeight: 1.35, margin: "5px 0" }}>{property.address}</h3></div>
+                    <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>📍 {locationText || "Location details not provided"}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: 12, borderRadius: 9, background: "var(--bg-input)" }}>
+                      <div><div style={{ color: "var(--text-muted)", fontSize: 11 }}>RESERVE PRICE</div><strong style={{ fontSize: 18 }}>{money(property.reserve_price)}</strong></div>
+                      <div><div style={{ color: "var(--text-muted)", fontSize: 11 }}>EMD</div><strong>{money(property.emd)}</strong></div>
                     </div>
-
-                    <div className="ig-badges-stack">
-                      {property.emd != null && (
-                        <span className="ig-emd-badge">
-                          EMD: ₹{property.emd.toLocaleString("en-IN")}
-                        </span>
-                      )}
-                      {property.discount_percentage != null && (
-                        <span className="ig-discount-pill">
-                          🎯 {property.discount_percentage.toFixed(0)}% Under Market Value
-                        </span>
-                      )}
-                      {property.deal_score != null && (
-                        <span
-                          style={{
-                            background: "rgba(139, 92, 246, 0.15)",
-                            color: "#c084fc",
-                            border: "1px solid rgba(139, 92, 246, 0.3)",
-                            padding: "6px 12px",
-                            borderRadius: 999,
-                            fontSize: 13,
-                            fontWeight: 700,
-                          }}
-                        >
-                          ⭐ Score {property.deal_score.toFixed(0)}
-                        </span>
-                      )}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "9px 12px", fontSize: 13 }}>
+                      <div><span style={{ color: "var(--text-muted)" }}>Property type</span><div>{property.property_type || "Not specified"}</div></div>
+                      <div><span style={{ color: "var(--text-muted)" }}>Area</span><div>{property.area_sqft ? `${property.area_sqft.toLocaleString("en-IN")} sq ft` : "As per notice"}</div></div>
+                      <div><span style={{ color: "var(--text-muted)" }}>Possession</span><div>{property.possession_type || "Not specified"}</div></div>
+                      <div><span style={{ color: "var(--text-muted)" }}>Property ID</span><div>{property.property_unique_id || property.auction_id || `#${property.id}`}</div></div>
+                      <div><span style={{ color: "var(--text-muted)" }}>Auction starts</span><div>{dateLabel(property.auction_start || property.auction_date)}</div></div>
+                      <div><span style={{ color: "var(--text-muted)" }}>Auction ends</span><div>{dateLabel(property.auction_end)}</div></div>
+                      <div><span style={{ color: "var(--text-muted)" }}>EMD deadline</span><div>{dateLabel(property.emd_deadline)}</div></div>
+                      <div><span style={{ color: "var(--text-muted)" }}>Inspection</span><div>{property.inspection_start || property.inspection_end ? `${dateLabel(property.inspection_start)} – ${dateLabel(property.inspection_end)}` : "Not specified"}</div></div>
                     </div>
-                  </div>
-
-                  {/* Card Content Body */}
-                  <div className="ig-card-body">
-                    <h3 className="ig-card-title">{property.address}</h3>
-                    {locationText && (
-                      <div className="ig-location-pin">
-                        <span>📍</span>
-                        <strong>{locationText}</strong>
-                      </div>
-                    )}
-
-                    <div className="ig-specs-chips">
-                      <div className="ig-spec-chip">
-                        <span>🏡 Type:</span>
-                        <strong>{property.property_type ?? "Property"}</strong>
-                      </div>
-                      <div className="ig-spec-chip">
-                        <span>📐 Area:</span>
-                        <strong>{property.area_sqft ? `${property.area_sqft.toLocaleString()} sq ft` : "As per deed"}</strong>
-                      </div>
-                      {property.survey_number && (
-                        <div className="ig-spec-chip">
-                          <span>📜 Khasra:</span>
-                          <strong>{property.survey_number}</strong>
-                        </div>
-                      )}
+                    {property.discount_percentage != null && <div style={{ color: "var(--accent-emerald)", fontSize: 13, fontWeight: 700 }}>Estimated {property.discount_percentage.toFixed(0)}% below comparable market value</div>}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: "auto", paddingTop: 8 }}>
+                      <Link to={`/properties/${property.id}`} style={{ flex: 1, minWidth: 130, textAlign: "center", textDecoration: "none", padding: "10px 12px", borderRadius: 7, background: "var(--accent-primary, #2563eb)", color: "#fff", fontWeight: 700, fontSize: 13 }}>View property</Link>
+                      <button type="button" onClick={() => openAnalyst(property.id, property.address)} style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid var(--border-subtle)", background: "transparent", color: "var(--text-primary)", cursor: "pointer" }}>Ask analyst</button>
+                      {officialUrl && <a href={officialUrl} target="_blank" rel="noreferrer" style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid var(--border-subtle)", color: "var(--text-primary)", textDecoration: "none", fontSize: 13 }}>Official notice ↗</a>}
                     </div>
-                  </div>
-
-                  {/* Card Footer Actions */}
-                  <div className="ig-card-footer">
-                    <div className="ig-footer-actions">
-                      <Link to={`/properties/${property.id}`} className="ig-btn-inspect">
-                        <span>Inspect Deal &amp; Evidence</span>
-                        <span>→</span>
-                      </Link>
-
-                      <button
-                        type="button"
-                        className="ig-btn-analyst-action"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          openAnalyst(property.id, property.address);
-                        }}
-                        title="Ask the Research Analyst about this lot"
-                      >
-                        <span>🤖 Ask Analyst</span>
-                      </button>
-
-                      {property.sources && property.sources.length > 0 && property.sources[0].source_url && (
-                        <a
-                          href={property.sources[0].source_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="ig-btn-pdf"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <span>📄 Notice {hasPdf ? "PDF" : ""} ↗</span>
-                        </a>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      className="ig-btn-share"
-                      onClick={(e) => handleCopyLink(property.id, e)}
-                    >
-                      <span>{copiedId === property.id ? "✅ Copied!" : "🔗 Share Link"}</span>
-                    </button>
+                    {property.estimated_value != null && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Our estimated market value: {money(property.estimated_value)} · Not a bank-verified figure</div>}
                   </div>
                 </article>
               );
