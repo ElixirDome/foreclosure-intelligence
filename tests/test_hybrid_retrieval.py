@@ -15,6 +15,7 @@ import subprocess
 import sys
 from unittest.mock import patch
 import pytest
+from app.services import embeddings
 from app.services.embeddings import EMBEDDING_VERSION, embedding_model_id
 
 from app.models import Document, DocumentChunk
@@ -55,6 +56,26 @@ class TestStableEmbeddings:
             )
         assert outputs[0] == outputs[1]
         assert EMBEDDING_VERSION == 3
+
+    def test_ollama_semantic_backend_is_used_when_configured(self, monkeypatch):
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"embeddings": [[3.0, 4.0]]}
+
+        monkeypatch.setattr(embeddings, "OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+        monkeypatch.setattr(embeddings, "_OLLAMA_UNAVAILABLE", False)
+        monkeypatch.setattr(
+            embeddings.requests,
+            "post",
+            lambda *args, **kwargs: FakeResponse(),
+        )
+
+        vector = embeddings.embed_text("auction reserve price")
+        assert vector == [0.6, 0.8]
+        assert embeddings.embedding_model_id() == "ollama:nomic-embed-text"
 
 
 class TestMultiQueryGeneration:
