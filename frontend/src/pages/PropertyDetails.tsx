@@ -44,6 +44,8 @@ function deduplicateDocuments(items: DocumentItem[]): DocumentItem[] {
 interface Property {
   id: number;
   address: string;
+  city?: string | null;
+  locality?: string | null;
   price: number | null;
   bedrooms: number | null;
   bathrooms: number | null;
