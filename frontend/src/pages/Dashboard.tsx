@@ -244,28 +244,22 @@ function Dashboard() {
 
   // Ref to hold current filter values so SSE event handler doesn't suffer from stale closures
   const filtersRef = useRef({
-    search,
-    status,
-    propertyType,
-    minPrice,
-    maxPrice,
-    activeStory,
-    userPreferences,
-    favorites,
+    search, status, propertyType, minPrice, maxPrice, minArea, maxArea,
+    bedrooms, minDiscount, maxDiscount, sortBy, order, page,
+    activeStory, userPreferences, favorites,
   });
 
   useEffect(() => {
     filtersRef.current = {
-      search,
-      status,
-      propertyType,
-      minPrice,
-      maxPrice,
-      activeStory,
-      userPreferences,
-      favorites,
+      search, status, propertyType, minPrice, maxPrice, minArea, maxArea,
+      bedrooms, minDiscount, maxDiscount, sortBy, order, page,
+      activeStory, userPreferences, favorites,
     };
-  }, [search, status, propertyType, minPrice, maxPrice, activeStory, userPreferences, favorites]);
+  }, [
+    search, status, propertyType, minPrice, maxPrice, minArea, maxArea,
+    bedrooms, minDiscount, maxDiscount, sortBy, order, page,
+    activeStory, userPreferences, favorites,
+  ]);
 
   // Live SSE Connection with Adaptive Polling Fallback
   useEffect(() => {
@@ -273,34 +267,46 @@ function Dashboard() {
     let fallbackInterval: number | null = null;
     let isMounted = true;
 
+    async function refreshCurrentPage() {
+      const filters = filtersRef.current;
+      const params: Record<string, string | number> = {
+        page: filters.page,
+        limit: 20,
+        sort_by: filters.sortBy,
+        order: filters.order,
+      };
+      if (filters.search.trim()) params.search = filters.search.trim();
+      if (filters.minPrice) params.min_price = Number(filters.minPrice);
+      if (filters.maxPrice) params.max_price = Number(filters.maxPrice);
+      if (filters.minArea) params.min_area = Number(filters.minArea);
+      if (filters.maxArea) params.max_area = Number(filters.maxArea);
+      if (filters.bedrooms) params.bedrooms = Number(filters.bedrooms);
+      if (filters.minDiscount) params.min_discount = Number(filters.minDiscount);
+      if (filters.maxDiscount) params.max_discount = Number(filters.maxDiscount);
+      if (filters.status) params.foreclosure_status = filters.status;
+      if (filters.propertyType) params.property_type = filters.propertyType;
+
+      const [propertiesResult, summaryResult] = await Promise.allSettled([
+        api.get<PropertyResponse>("/properties/", { params }),
+        api.get("/properties/summary"),
+      ]);
+      if (!isMounted) return;
+      if (propertiesResult.status === "fulfilled") {
+        // Reconcile existing rows too; updates must not wait for a new property ID.
+        setProperties(propertiesResult.value.data.items);
+        setTotal(propertiesResult.value.data.total);
+        setPages(propertiesResult.value.data.pages);
+      }
+      if (summaryResult.status === "fulfilled") {
+        setSummary(summaryResult.value.data);
+      }
+    }
+
     function startPollingFallback() {
       if (fallbackInterval) return;
       setStreamStatus("polling");
       fallbackInterval = window.setInterval(() => {
-        // Silent background refresh
-        api.get<PropertyResponse>("/properties/", {
-          params: {
-            page: 1,
-            limit: 20,
-            sort_by: sortBy,
-            order,
-            ...(filtersRef.current.search.trim() ? { search: filtersRef.current.search.trim() } : {}),
-          },
-        }).then((res) => {
-          if (!isMounted) return;
-          setProperties((prev) => {
-            const existingIds = new Set(prev.map((p) => p.id));
-            const freshItems = res.data.items;
-            const hasNew = freshItems.some((p) => !existingIds.has(p.id));
-            return hasNew ? freshItems : prev;
-          });
-          setTotal(res.data.total);
-          setPages(res.data.pages);
-        }).catch(() => {});
-
-        api.get("/properties/summary")
-          .then((res) => isMounted && setSummary(res.data))
-          .catch(() => {});
+        void refreshCurrentPage();
       }, 15000);
     }
 
@@ -353,10 +359,10 @@ function Dashboard() {
               address: data.address || "Auction Property",
               city: data.city || null,
               locality: data.locality || null,
-              price: data.reserve_price ?? data.price ?? null,
+              price: data.price ?? data.reserve_price ?? null,
               reserve_price: data.reserve_price ?? null,
               emd: data.emd ?? null,
-              opening_bid: data.opening_bid ?? data.reserve_price ?? null,
+              opening_bid: data.opening_bid ?? null,
               estimated_value: data.estimated_value ?? null,
               property_type: data.property_type ?? "Residential Property",
               auction_date: data.auction_date ?? null,
@@ -370,13 +376,8 @@ function Dashboard() {
               sources: data.sources ?? [],
             };
 
-            // Prepend new property without duplicate IDs
-            setProperties((prev) => {
-              if (prev.some((p) => p.id === newProp.id)) {
-                return prev.map((p) => (p.id === newProp.id ? { ...p, ...newProp } : p));
-              }
-              return [newProp, ...prev];
-            });
+            // Keep server-side sorting, filters and pagination authoritative.
+            void refreshCurrentPage();
 
             // Trigger visual 8-second highlight badge
             setJustAddedIds((prev) => (prev.includes(newProp.id) ? prev : [...prev, newProp.id]));
@@ -386,27 +387,7 @@ function Dashboard() {
               }
             }, 8000);
 
-            // Increment local counters
-            setTotal((prev) => prev + 1);
-            setSummary((prev) => ({
-              ...prev,
-              total_properties: prev.total_properties + 1,
-              residential: newProp.property_type?.toLowerCase().includes("commercial")
-                ? prev.residential
-                : prev.residential + 1,
-              commercial: newProp.property_type?.toLowerCase().includes("commercial")
-                ? prev.commercial + 1
-                : prev.commercial,
-              upcoming_auctions:
-                newProp.foreclosure_status === "scheduled" || newProp.foreclosure_status === "active"
-                  ? prev.upcoming_auctions + 1
-                  : prev.upcoming_auctions,
-            }));
-
-            // Sync summary in background
-            api.get("/properties/summary")
-              .then((res) => isMounted && setSummary(res.data))
-              .catch(() => {});
+            // Counts are reconciled from the server; duplicate SSE delivery cannot inflate them.
 
             // Filter awareness verification
             const {
@@ -500,9 +481,16 @@ function Dashboard() {
                 if (p.id === propId) {
                   return {
                     ...p,
+                    address: data.address ?? p.address,
+                    city: data.city ?? p.city,
+                    locality: data.locality ?? p.locality,
+                    property_type: data.property_type ?? p.property_type,
                     reserve_price: data.reserve_price ?? p.reserve_price,
-                    price: data.reserve_price ?? p.price,
+                    opening_bid: data.opening_bid ?? p.opening_bid,
+                    price: data.price ?? data.reserve_price ?? p.price,
                     emd: data.emd ?? p.emd,
+                    area_sqft: data.area_sqft ?? p.area_sqft,
+                    survey_number: data.survey_number ?? p.survey_number,
                     foreclosure_status: data.foreclosure_status ?? p.foreclosure_status,
                     auction_date: data.auction_date ?? p.auction_date,
                     discount_percentage: data.discount_percentage ?? p.discount_percentage,
@@ -513,10 +501,8 @@ function Dashboard() {
               })
             );
 
-            // Refresh summary counts in background when properties update
-            api.get("/properties/summary")
-              .then((res) => isMounted && setSummary(res.data))
-              .catch(() => {});
+            // Reconcile membership and summary if fields affect filters or sorting.
+            void refreshCurrentPage();
           } catch (e) {
             console.error("Error processing property_updated event:", e);
           }
@@ -986,7 +972,7 @@ function Dashboard() {
                     <div className="ig-badges-stack">
                       {property.emd != null && (
                         <span className="ig-emd-badge">
-                          EMD: ₹{property.emd.toLocaleString("en-IN")} (10%)
+                          EMD: ₹{property.emd.toLocaleString("en-IN")}
                         </span>
                       )}
                       {property.discount_percentage != null && (
