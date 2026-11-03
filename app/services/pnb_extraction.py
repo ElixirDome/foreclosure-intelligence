@@ -136,7 +136,7 @@ def _extract_address(text: str):
     # Example:
     # Residential Property situated at Plot No. 198...
     match = re.search(
-    r"Residential\s+(?:Property|House)"
+    r"Residential\s+(?:Property|House|Flat|Plot|Land)"
     r"\s+(?:situated|located|standing)"
     r"\s+(?:at|on)\s+(.+?)"
     r"(?:\bMeasuring\b|\bBounded\b|\bReserve Price\b|\bEMD\b|\n\s*\d+\s*[.)])",
@@ -153,7 +153,7 @@ def _extract_address(text: str):
     # All part & parcel of Residential House measuring...
     match = re.search(
         r"(?:All\s+part\s*(?:&|and)\s*parcel\s+of\s+)"
-        r"(Residential\s+(?:House|Property).+?)"
+        r"(Residential\s+(?:House|Property|Flat|Plot|Land).+?)"
         r"(?=\bmeasuring\b)",
         text,
         re.IGNORECASE | re.DOTALL,
@@ -306,9 +306,13 @@ def extract_pnb_properties(text: str) -> list[dict]:
 
     candidates = []
 
+    # Normalize common OCR confusions in the residential keyword.
+    text = re.sub(r"res[i1l]dent[i1l]a[l1]", "Residential", text, flags=re.IGNORECASE)
+    text = re.sub(r"residen\s+tial", "Residential", text, flags=re.IGNORECASE)
+
     matches = list(
         re.finditer(
-            r"\bResidential\s+(?:Property|House)\b",
+            r"\bResidential\s+(?:Property|House|Flat|Plot|Land)\b",
             text,
             re.IGNORECASE,
         )

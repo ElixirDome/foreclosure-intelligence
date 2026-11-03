@@ -3,6 +3,7 @@ from app.services.pnb_extraction import (
     _parse_emd,
     _parse_opening_bid,
     extract_pnb_property,
+    extract_pnb_properties,
 )
 
 
@@ -41,3 +42,16 @@ def test_pnb_emd_is_extracted_independently_from_reserve_price():
     assert extracted["emd"] == 300000.0
     assert _parse_emd("Earnest Money Deposit: Rs. 2.5 lakh") == 250000.0
     assert _parse_emd("Reserve Price: Rs. 30,00,000/-") is None
+
+
+def test_pnb_extraction_repairs_ocr_typos_and_recognizes_residential_plot():
+    text = (
+        "Auction Notice\n"
+        "All that piece and parcel of Res1dentia1 Plot situated at "
+        "Plot No. 14, Sector 8, Chandigarh measuring 120 Sq Yards. "
+        "Reserve Price: Rs. 45,00,000/-"
+    )
+    properties = extract_pnb_properties(text)
+    assert len(properties) == 1
+    assert properties[0]["address"]
+    assert properties[0]["reserve_price"] == 4500000.0
