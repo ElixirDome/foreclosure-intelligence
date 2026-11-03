@@ -159,14 +159,20 @@ def _structured_from_context(ctx: MultiSourceContext) -> StructuredAnalysis:
 
     props = ctx.by_kind("property")
     for p in props:
-        lower = p.text.lower()
-        if "foreclosure_status: sold" in lower:
+        metadata = p.metadata or {}
+        status = str(metadata.get("foreclosure_status") or "").lower()
+        if status == "sold":
             risks.append("Auction status is sold")
-        if "foreclosure_status: cancelled" in lower:
+        if status == "cancelled":
             risks.append("Auction status is cancelled")
-        if ("opening_bid:" in p.text or "reserve_price:" in p.text) and ("estimated_value: None" in p.text or "automated_comparable_estimate: None" in p.text):
-            risks.append("Auction reserve present without independent market valuation")
-            diligence.append("Commission an independent property valuation to verify market spread")
+        if (
+            metadata.get("reserve_price") is not None
+            and metadata.get("estimated_value") is None
+        ):
+            risks.append("Auction reserve is recorded without an independent market valuation")
+            diligence.append(
+                "Commission an independent property valuation to verify the market spread"
+            )
 
     docs = ctx.by_kind("document")
     if docs:
