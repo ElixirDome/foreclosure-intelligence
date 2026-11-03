@@ -10,8 +10,12 @@ Comprehensive unit and integration tests for Hybrid Retrieval (Section B):
 """
 
 from datetime import datetime, timezone
+import os
+import subprocess
+import sys
 from unittest.mock import patch
 import pytest
+from app.services.embeddings import EMBEDDING_VERSION
 
 from app.models import Document, DocumentChunk
 from app.services.bm25 import BM25Ranker
@@ -26,6 +30,27 @@ from app.services.retrieval import (
     retrieve,
     vector_search,
 )
+
+
+class TestStableEmbeddings:
+    def test_embedding_is_stable_across_processes(self):
+        """Stored vectors must be reproducible across API and worker processes."""
+        snippet = (
+            "from app.services.embeddings import embed_text; "
+            "print(embed_text('PNB reserve price Pathankot 3438000'))"
+        )
+        outputs = []
+        for seed in ("1", "98765"):
+            env = dict(os.environ, PYTHONHASHSEED=seed)
+            outputs.append(
+                subprocess.check_output(
+                    [sys.executable, "-c", snippet],
+                    env=env,
+                    text=True,
+                ).strip()
+            )
+        assert outputs[0] == outputs[1]
+        assert EMBEDDING_VERSION == 2
 
 
 class TestMultiQueryGeneration:

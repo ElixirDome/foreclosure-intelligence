@@ -15,7 +15,6 @@ Architectural notes:
 
 from __future__ import annotations
 
-import concurrent.futures
 import logging
 import re
 from dataclasses import dataclass
@@ -25,7 +24,12 @@ from sqlalchemy.orm import Session
 
 from app.models import Document, DocumentChunk
 from app.services.bm25 import BM25Ranker
-from app.services.embeddings import cosine_similarity, embed_text, tokenize
+from app.services.embeddings import (
+    EMBEDDING_VERSION,
+    cosine_similarity,
+    embed_text,
+    tokenize,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +101,7 @@ def index_chunk_embedding(chunk: DocumentChunk) -> None:
     """Attach embedding to chunk metadata (in-place, caller commits)."""
     meta = dict(chunk.metadata_json or {})
     meta["embedding"] = embed_text(chunk.text)
+    meta["embedding_version"] = EMBEDDING_VERSION
     chunk.metadata_json = meta
 
 
@@ -117,6 +122,7 @@ def bm25_search(
     query: str,
     *,
     document_id: int | None = None,
+    document_ids: list[int] | None = None,
     limit: int = 8,
 ) -> list[RetrievedChunk]:
     """
@@ -131,6 +137,10 @@ def bm25_search(
     )
     if document_id is not None:
         q = q.filter(DocumentChunk.document_id == document_id)
+    elif document_ids is not None:
+        if not document_ids:
+            return []
+        q = q.filter(DocumentChunk.document_id.in_(document_ids))
 
     rows = q.all()
     if not rows:
@@ -171,6 +181,7 @@ def vector_search(
     query: str,
     *,
     document_id: int | None = None,
+    document_ids: list[int] | None = None,
     limit: int = 8,
     min_score: float = 0.05,
 ) -> list[RetrievedChunk]:
@@ -187,16 +198,21 @@ def vector_search(
     )
     if document_id is not None:
         q = q.filter(DocumentChunk.document_id == document_id)
+    elif document_ids is not None:
+        if not document_ids:
+            return []
+        q = q.filter(DocumentChunk.document_id.in_(document_ids))
 
     scored: list[RetrievedChunk] = []
     for chunk, doc in q.all():
         meta = chunk.metadata_json or {}
         emb = meta.get("embedding")
-        if not emb:
-            # Lazy-index missing embeddings
+        if not emb or meta.get("embedding_version") != EMBEDDING_VERSION:
+            # Rebuild legacy or missing vectors whose old hashes are process-randomized.
             emb = embed_text(chunk.text)
             meta = dict(meta)
             meta["embedding"] = emb
+            meta["embedding_version"] = EMBEDDING_VERSION
             chunk.metadata_json = meta
 
         score = cosine_similarity(query_vec, emb)
@@ -307,13 +323,14 @@ def parallel_search(
     query: str,
     *,
     document_id: int | None = None,
+    document_ids: list[int] | None = None,
     limit: int = 8,
     timeout: float = 3.0,
     rrf_k: int = 60,
 ) -> list[RetrievedChunk]:
     """
-    Executes multi-query variants and independent retrieval branches (BM25 + Vector)
-    concurrently, with graceful failure recovery and reciprocal-rank fusion.
+    Executes multi-query BM25 and vector branches sequentially on one Session,
+    with branch-level failure recovery and reciprocal-rank fusion.
     """
     if not query or not query.strip():
         return []
@@ -321,35 +338,40 @@ def parallel_search(
     variants = generate_query_variants(query)
     ranked_lists: list[list[RetrievedChunk]] = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        futures = []
-
-        # Launch BM25 branch for original query and variants
-        for v in variants:
-            futures.append(
-                executor.submit(bm25_search, db, v, document_id=document_id, limit=limit * 2)
+    # SQLAlchemy Session instances are not thread-safe. Run BM25 and vector
+    # branches sequentially on this request's Session, with isolated failures.
+    _ = timeout  # Retained for backwards-compatible callers.
+    for variant in variants:
+        try:
+            results = bm25_search(
+                db, variant, document_id=document_id,
+                document_ids=document_ids, limit=limit * 2,
             )
+            if results:
+                ranked_lists.append(results)
+        except Exception as exc:
+            logger.warning("BM25 retrieval branch failed: %s", exc)
 
-        # Launch Vector branch for original query and primary variant
-        for v in variants[:2]:
-            futures.append(
-                executor.submit(vector_search, db, v, document_id=document_id, limit=limit * 2)
+    for variant in variants[:2]:
+        try:
+            results = vector_search(
+                db, variant, document_id=document_id,
+                document_ids=document_ids, limit=limit * 2,
             )
-
-        # Gather results with bounded timeout
-        for future in futures:
-            try:
-                res = future.result(timeout=timeout)
-                if res:
-                    ranked_lists.append(res)
-            except concurrent.futures.TimeoutError:
-                logger.warning("Retrieval branch timed out after %.2fs", timeout)
-            except Exception as exc:
-                logger.warning("Retrieval branch failed: %s", exc)
+            if results:
+                ranked_lists.append(results)
+        except Exception as exc:
+            logger.warning("Vector retrieval branch failed: %s", exc)
 
     if not ranked_lists:
-        # Fallback to direct synchronous BM25 search
-        return bm25_search(db, query, document_id=document_id, limit=limit)
+        try:
+            return bm25_search(
+                db, query, document_id=document_id,
+                document_ids=document_ids, limit=limit,
+            )
+        except Exception as exc:
+            logger.warning("BM25 fallback failed: %s", exc)
+            return []
 
     fused = reciprocal_rank_fusion(ranked_lists, k=rrf_k, limit=limit * 2)
     return deduplicate_chunks(fused, limit=limit)
@@ -371,10 +393,14 @@ def hybrid_search(
     query: str,
     *,
     document_id: int | None = None,
+    document_ids: list[int] | None = None,
     limit: int = 8,
     **kwargs: Any,
 ) -> list[RetrievedChunk]:
-    return parallel_search(db, query, document_id=document_id, limit=limit)
+    return parallel_search(
+        db, query, document_id=document_id,
+        document_ids=document_ids, limit=limit,
+    )
 
 
 def retrieve(
@@ -383,6 +409,7 @@ def retrieve(
     *,
     mode: str = "hybrid",
     document_id: int | None = None,
+    document_ids: list[int] | None = None,
     limit: int = 8,
 ) -> list[RetrievedChunk]:
     """
@@ -391,7 +418,16 @@ def retrieve(
     """
     m = (mode or "hybrid").lower()
     if m in ("bm25", "keyword"):
-        return bm25_search(db, query, document_id=document_id, limit=limit)
+        return bm25_search(
+            db, query, document_id=document_id,
+            document_ids=document_ids, limit=limit,
+        )
     if m == "vector":
-        return vector_search(db, query, document_id=document_id, limit=limit)
-    return parallel_search(db, query, document_id=document_id, limit=limit)
+        return vector_search(
+            db, query, document_id=document_id,
+            document_ids=document_ids, limit=limit,
+        )
+    return parallel_search(
+        db, query, document_id=document_id,
+        document_ids=document_ids, limit=limit,
+    )

@@ -8,11 +8,13 @@ without changing callers.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from collections import Counter
 
 VECTOR_DIM = 256
+EMBEDDING_VERSION = 2
 _TOKEN_RE = re.compile(r"[a-z0-9]+(?:\.[0-9]+)?", re.IGNORECASE)
 
 
@@ -32,7 +34,13 @@ def embed_text(text: str, dim: int = VECTOR_DIM) -> list[float]:
     vec = [0.0] * dim
     for token, count in counts.items():
         # Stable hash into bucket; sign bit reduces collisions.
-        h = hash(token)
+        # Python's built-in hash is randomized between processes. A stable
+        # digest keeps persisted vectors compatible across API/worker restarts.
+        h = int.from_bytes(
+            hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest(),
+            byteorder="big",
+            signed=False,
+        )
         idx = h % dim
         sign = 1.0 if (h & 1) == 0 else -1.0
         # Simple TF weighting

@@ -67,27 +67,26 @@ class MultiSourceContext:
         return [i for i in self.items if i.kind == kind]
 
     def as_prompt_blocks(self, max_chars: int = 12000) -> str:
+        """Render numbered, readable evidence blocks for grounded synthesis."""
         blocks: list[str] = []
         used = 0
         for i, item in enumerate(self.items, start=1):
-            block = (
-                f"[{i}] kind={item.kind} id={item.source_id} "
-                f"score={item.score:.3f}\n"
-                f"title: {item.title}\n"
-                f"{item.text}"
-            )
+            meta = item.metadata or {}
+            source_parts = []
+            if meta.get("source_name"):
+                source_parts.append(str(meta["source_name"]))
+            if meta.get("filename") and meta.get("filename") != item.title:
+                source_parts.append(str(meta["filename"]))
+            if meta.get("page_number"):
+                source_parts.append(f"page {meta['page_number']}")
+            source_label = f" ({', '.join(source_parts)})" if source_parts else ""
+            header = f"[{i}] {item.title}{source_label}\n"
+            block = header + item.text.strip()
             if used + len(block) > max_chars:
                 remaining = max_chars - used
-                if remaining > 250:
-                    header = (
-                        f"[{i}] kind={item.kind} id={item.source_id} "
-                        f"score={item.score:.3f}\ntitle: {item.title}\n"
-                    )
-                    body_allowance = remaining - len(header) - 20
-                    if body_allowance > 50:
-                        blocks.append(
-                            header + item.text[:body_allowance] + "\n... [truncated]"
-                        )
+                if remaining > len(header) + 60:
+                    allowance = remaining - len(header) - 20
+                    blocks.append(header + item.text[:allowance].rstrip() + "…")
                 break
             blocks.append(block)
             used += len(block)
@@ -120,46 +119,41 @@ def _score_text_match(query: str, text: str) -> float:
     return min(1.0, len(overlap) / len(q))
 
 
-def _property_blob(prop: Property) -> str:
-    automated_valuations = [
+def _property_metadata(prop: Property) -> dict[str, Any]:
+    valuations = [
         valuation
         for valuation in prop.valuations
         if valuation.source == "market_comparables"
         and valuation.valuation_method == "residential_comparable_sales"
     ]
-    latest_valuation = (
-        max(automated_valuations, key=lambda valuation: valuation.id)
-        if automated_valuations
-        else None
-    )
-    estimated_value = (
-        latest_valuation.estimated_value
-        if latest_valuation is not None
-        else None
-    )
-    valuation_confidence = (
-        latest_valuation.confidence
-        if latest_valuation is not None
-        else None
-    )
+    latest = max(valuations, key=lambda item: item.id) if valuations else None
+    return {
+        "property_id": prop.id,
+        "foreclosure_status": prop.foreclosure_status,
+        "reserve_price": prop.reserve_price,
+        "opening_bid": prop.opening_bid,
+        "estimated_value": latest.estimated_value if latest else None,
+        "valuation_confidence": latest.confidence if latest else None,
+    }
 
+
+def _property_blob(prop: Property) -> str:
+    meta = _property_metadata(prop)
     parts = [
-        f"Property #{prop.id}",
-        f"address: {prop.address}",
-        f"city: {prop.city}",
-        f"locality: {prop.locality}",
-        f"type: {prop.property_type}",
-        f"area_sqft: {prop.area_sqft}",
-        f"opening_bid: {prop.opening_bid}",
-        f"reserve_price: {prop.reserve_price}",
-        f"emd: {prop.emd}",
-        f"automated_comparable_estimate: {estimated_value}",
-        f"valuation_confidence: {valuation_confidence}",
-        f"auction_date: {prop.auction_date}",
-        f"foreclosure_status: {prop.foreclosure_status}",
-        f"survey_number: {prop.survey_number}",
+        f"Property {prop.id}: {prop.address}",
+        f"Location: {', '.join(part for part in [prop.locality, prop.city] if part)}",
+        f"Property type: {prop.property_type}",
+        f"Area: {prop.area_sqft} square feet" if prop.area_sqft is not None else None,
+        f"Opening bid: ₹{prop.opening_bid:,.0f}" if prop.opening_bid is not None else None,
+        f"Bank reserve price: ₹{prop.reserve_price:,.0f}" if prop.reserve_price is not None else None,
+        f"Earnest money deposit (EMD): ₹{prop.emd:,.0f}" if prop.emd is not None else None,
+        f"Comparable-based market estimate: ₹{meta['estimated_value']:,.0f}" if meta["estimated_value"] is not None else "No automated comparable-based market estimate is recorded",
+        f"Valuation confidence: {float(meta['valuation_confidence']):.0%}" if meta["valuation_confidence"] is not None else None,
+        f"Auction date: {prop.auction_date}" if prop.auction_date else None,
+        f"Auction status: {prop.foreclosure_status}" if prop.foreclosure_status else None,
+        f"Survey number: {prop.survey_number}" if prop.survey_number else None,
     ]
-    return "\n".join(str(p) for p in parts if not str(p).endswith(": None"))
+    return "\n".join(part for part in parts if part)
 
 
 def retrieve_document_context(
@@ -185,16 +179,14 @@ def retrieve_document_context(
     items: list[ContextItem] = []
 
     if doc_ids is not None:
-        for did in doc_ids:
-            chunks = retrieve(
-                db,
-                question,
-                mode=mode,
-                document_id=did,
-                limit=max(2, limit // max(len(doc_ids), 1)),
-            )
-            for c in chunks:
-                items.append(_chunk_to_item(c))
+        chunks = retrieve(
+            db,
+            question,
+            mode=mode,
+            document_ids=doc_ids,
+            limit=max(limit * 3, limit),
+        )
+        items.extend(_chunk_to_item(c) for c in chunks)
     else:
         chunks = retrieve(
             db,
@@ -245,11 +237,47 @@ def retrieve_property_context(
                 title=prop.address,
                 text=_property_blob(prop),
                 score=1.0,
-                metadata={"property_id": prop.id},
+                metadata=_property_metadata(prop),
             )
         ]
 
-    props = db.query(Property).order_by(Property.id.desc()).limit(200).all()
+    # Search the full inventory for matching address/location/survey terms.
+    # The former latest-200 scan made older matching properties invisible.
+    stopwords = {
+        "the", "and", "for", "with", "this", "that", "what", "where",
+        "when", "which", "does", "from", "about", "show", "find", "list",
+        "all", "property", "properties", "investment", "good", "deal",
+        "please", "tell", "give", "have", "there", "their", "into",
+    }
+    terms = [
+        token for token in tokenize(question)
+        if len(token) >= 3 and token not in stopwords
+    ][:10]
+    predicates = []
+    for term in terms:
+        pattern = f"%{term}%"
+        predicates.extend([
+            Property.address.ilike(pattern),
+            Property.city.ilike(pattern),
+            Property.locality.ilike(pattern),
+            Property.survey_number.ilike(pattern),
+        ])
+    for property_number in re.findall(
+        r"\b(?:property|lot|plot)\s*#?\s*(\d+)\b",
+        question,
+        re.IGNORECASE,
+    ):
+        predicates.append(Property.id == int(property_number))
+    if not predicates:
+        return []
+
+    props = (
+        db.query(Property)
+        .filter(or_(*predicates))
+        .order_by(Property.id.desc())
+        .limit(1000)
+        .all()
+    )
     scored: list[ContextItem] = []
     for prop in props:
         blob = _property_blob(prop)
@@ -263,7 +291,7 @@ def retrieve_property_context(
                 title=prop.address or f"property {prop.id}",
                 text=blob,
                 score=score,
-                metadata={"property_id": prop.id},
+                metadata=_property_metadata(prop),
             )
         )
     scored.sort(key=lambda x: x.score, reverse=True)
@@ -280,19 +308,21 @@ def retrieve_evidence_context(
     if not property_ids:
         return []
 
+    # Rank the complete evidence set before applying the context limit.
     rows = (
         db.query(Evidence)
         .filter(Evidence.property_id.in_(property_ids))
-        .order_by(Evidence.id)
-        .limit(limit)
+        .order_by(Evidence.id.desc())
         .all()
     )
     items: list[ContextItem] = []
     for e in rows:
         text = (
-            f"field={e.field}\nvalue={e.value}\n"
-            f"page={e.page_number}\nsource={e.source_text}\n"
-            f"method={e.extraction_method}\nconfidence={e.confidence}"
+            f"Extracted fact: {e.field} is {e.value}.\n"
+            f"Supporting notice text: {e.source_text or 'Not retained'}.\n"
+            f"Notice page: {e.page_number if e.page_number is not None else 'Not recorded'}.\n"
+            f"Extraction method: {e.extraction_method or 'Not recorded'}.\n"
+            f"Extraction confidence: {e.confidence if e.confidence is not None else 'Not recorded'}."
         )
         if question:
             match = _score_text_match(
@@ -322,7 +352,7 @@ def retrieve_evidence_context(
         )
     if question:
         items.sort(key=lambda x: x.score, reverse=True)
-    return items
+    return items[:limit]
 
 
 def retrieve_comparable_context(
@@ -571,7 +601,19 @@ def build_multi_source_context(
         reverse=True,
     )
 
-    ctx.items = items
+    # Keep the best excerpt per document page before numbering prompt citations.
+    deduplicated_items: list[ContextItem] = []
+    seen_document_pages: set[tuple[int | None, int | None]] = set()
+    for item in items:
+        if item.kind == "document":
+            meta = item.metadata or {}
+            page_key = (meta.get("document_id"), meta.get("page_number"))
+            if page_key in seen_document_pages:
+                continue
+            seen_document_pages.add(page_key)
+        deduplicated_items.append(item)
+
+    ctx.items = deduplicated_items
     ctx.property_ids = sorted(set(property_ids))
     ctx.document_ids = sorted(
         {
