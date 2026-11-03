@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
 from pwdlib import PasswordHash
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 from app.database import get_db
-from app.models import User
-from app.schemas import UserCreate, UserResponse, UserLogin,Token
-from app.security import verify_password, create_access_token
+from app.models import User, UserPreference
+from app.schemas import UserCreate, UserResponse, UserLogin, Token
+from app.security import verify_password, create_access_token, get_current_user
 
 
 router = APIRouter(
@@ -105,3 +106,80 @@ def login(
         "access_token": access_token,
         "token_type": "bearer"
     }
+
+class UserPreferencesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: str | None = None
+    district: str | None = None
+    city: str | None = None
+    locality: str | None = None
+    property_types: list[str] = Field(default_factory=list)
+    min_reserve_price: float | None = None
+    max_reserve_price: float | None = None
+    preferred_banks: list[str] = Field(default_factory=list)
+    onboarding_completed: bool = True
+
+
+@router.get("/me/preferences")
+def get_my_preferences(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    preference = (
+        db.query(UserPreference)
+        .filter(UserPreference.user_id == current_user.id)
+        .first()
+    )
+    if preference is None:
+        return {
+            "state": None,
+            "district": None,
+            "city": None,
+            "locality": None,
+            "property_types": [],
+            "min_reserve_price": None,
+            "max_reserve_price": None,
+            "preferred_banks": [],
+            "onboarding_completed": False,
+        }
+    return {
+        "state": preference.state,
+        "district": preference.district,
+        "city": preference.city,
+        "locality": preference.locality,
+        "property_types": preference.property_types or [],
+        "min_reserve_price": (
+            float(preference.min_reserve_price)
+            if preference.min_reserve_price is not None else None
+        ),
+        "max_reserve_price": (
+            float(preference.max_reserve_price)
+            if preference.max_reserve_price is not None else None
+        ),
+        "preferred_banks": preference.preferred_banks or [],
+        "onboarding_completed": preference.onboarding_completed,
+    }
+
+
+@router.put("/me/preferences")
+def update_my_preferences(
+    payload: UserPreferencesUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    preference = (
+        db.query(UserPreference)
+        .filter(UserPreference.user_id == current_user.id)
+        .first()
+    )
+    if preference is None:
+        preference = UserPreference(user_id=current_user.id)
+        db.add(preference)
+
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(preference, field, value)
+
+    db.commit()
+    db.refresh(preference)
+    return get_my_preferences(db=db, current_user=current_user)
