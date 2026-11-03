@@ -1,6 +1,6 @@
 """
 Chunk retrieval engine: Multi-Query Generation, Genuine BM25, Stored Vector Retrieval,
-Concurrent Parallel Execution, Reciprocal Rank Fusion (RRF), and Context Deduplication.
+Session-safe Hybrid Retrieval, Reciprocal Rank Fusion (RRF), and Context Deduplication.
 
 Architectural notes:
 - BM25: Genuine Okapi BM25 ranker with inverse document frequency and length normalization.
@@ -9,7 +9,7 @@ Architectural notes:
   search with stable cross-process hash indexing.
 - Multi-query: Expands investigative underwriter questions into domain variants while preserving
   the verbatim query at rank 0, avoiding unnecessary overhead on simple lot/address lookups.
-- Parallelism: Executes independent BM25 and Vector search branches concurrently with timeouts.
+- Session safety: Executes BM25 and Vector branches sequentially on the request Session.
 - RRF: Reciprocal Rank Fusion with configurable k constant (default 60) and deterministic tie-breaking.
 """
 

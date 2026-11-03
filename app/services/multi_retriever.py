@@ -338,7 +338,7 @@ def retrieve_evidence_context(
             ContextItem(
                 kind="evidence",
                 source_id=f"evidence:{e.id}",
-                title=f"{e.field} = {e.value}",
+                title=f"{e.field.replace('_', ' ').title()}: {e.value}",
                 text=text,
                 score=score,
                 metadata={
@@ -433,12 +433,18 @@ def retrieve_valuation_context(
     items = []
     for v in rows:
         text = (
-            f"Valuation #{v.id} for property {v.property_id}\n"
-            f"estimated_value: {v.estimated_value}\n"
-            f"method: {v.valuation_method}\n"
-            f"source: {v.source}\n"
-            f"confidence: {v.confidence}\n"
-            f"date: {v.valuation_date}"
+            f"Comparable-based valuation for property {v.property_id}.\n"
+            f"Estimated market value: ₹{float(v.estimated_value):,.0f}.\n"
+            f"Valuation method: {v.valuation_method or 'Not recorded'}.\n"
+            f"Valuation source: {v.source or 'Not recorded'}.\n"
+            f"Confidence: {float(v.confidence):.0%}." if v.confidence is not None
+            else (
+                f"Comparable-based valuation for property {v.property_id}.\n"
+                f"Estimated market value: ₹{float(v.estimated_value):,.0f}.\n"
+                f"Valuation method: {v.valuation_method or 'Not recorded'}.\n"
+                f"Valuation source: {v.source or 'Not recorded'}.\n"
+                "Confidence was not recorded."
+            )
         )
         items.append(
             ContextItem(
@@ -473,18 +479,18 @@ def retrieve_deal_context(
             f"{f.direction} {f.label}" for f in deal.factors
         )
         text = (
-            f"Deal intelligence for property {pid}\n"
-            f"score: {deal.deal_score}\n"
-            f"rating: {deal.deal_rating}\n"
-            f"discount_%: {deal.discount_percentage}\n"
-            f"discount_amount: {deal.discount_amount}\n"
-            f"price_per_sqft: {deal.price_per_sqft}\n"
-            f"risk_level: {deal.risk_level}\n"
-            f"opening_bid: {deal.opening_bid}\n"
-            f"estimated_value: {deal.estimated_value}\n"
-            f"comparables_used: {deal.comparable_count}\n"
-            f"factors:\n{factors}\n"
-            f"explanation:\n{deal.explanation}"
+            f"Deal assessment for property {pid}.\n"
+            f"Deal score: {deal.deal_score} out of 100.\n"
+            f"Deal rating: {deal.deal_rating or 'Not available'}.\n"
+            f"Discount against estimated market value: {deal.discount_percentage}%.\n"
+            f"Estimated discount amount: ₹{deal.discount_amount:,.0f}.\n"
+            f"Price per square foot: ₹{deal.price_per_sqft:,.0f}.\n"
+            f"Risk level: {deal.risk_level}.\n"
+            f"Bank opening bid: {deal.opening_bid}.\n"
+            f"Comparable-based market estimate: {deal.estimated_value}.\n"
+            f"Comparables used: {deal.comparable_count}.\n"
+            f"Factors: {factors or 'No additional factors recorded'}.\n"
+            f"Explanation: {deal.explanation}"
         )
         items.append(
             ContextItem(
@@ -607,7 +613,12 @@ def build_multi_source_context(
     for item in items:
         if item.kind == "document":
             meta = item.metadata or {}
-            page_key = (meta.get("document_id"), meta.get("page_number"))
+            page_key = (
+                meta.get("document_id"),
+                meta.get("page_number")
+                if meta.get("page_number") is not None
+                else item.source_id,
+            )
             if page_key in seen_document_pages:
                 continue
             seen_document_pages.add(page_key)
