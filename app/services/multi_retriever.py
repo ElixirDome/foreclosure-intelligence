@@ -379,15 +379,13 @@ def retrieve_comparable_context(
     scored: list[ContextItem] = []
     for c in comps:
         blob = (
-            f"Comparable #{c.id}\n"
-            f"address: {c.address}\n"
-            f"city: {c.city}\n"
-            f"locality: {c.locality}\n"
-            f"type: {c.property_type}\n"
-            f"area_sqft: {c.area_sqft}\n"
-            f"sale_price: {c.sale_price}\n"
-            f"sale_date: {c.sale_date}\n"
-            f"source: {c.source}"
+            f"Market comparable: {c.address}.\n"
+            f"Location: {', '.join(part for part in [c.locality, c.city] if part)}.\n"
+            f"Property type: {c.property_type or 'Not recorded'}.\n"
+            f"Area: {c.area_sqft} square feet.\n"
+            f"Recorded sale price: ₹{float(c.sale_price):,.0f}.\n"
+            f"Sale date: {c.sale_date or 'Not recorded'}.\n"
+            f"Sale source: {c.source or 'Not recorded'}."
         )
         # Prefer city-matched comps even without query overlap
         base = 0.4 if (city and c.city == city) else 0.0
