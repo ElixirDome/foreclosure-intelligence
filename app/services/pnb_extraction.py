@@ -81,6 +81,24 @@ def _parse_price(text: str):
     return value
 
 
+def _parse_emd(text: str):
+    """Extract EMD only when the notice explicitly labels the amount."""
+    match = re.search(
+        r"(?:Earnest\s+Money\s+Deposit|EMD(?:\s+Amount)?)"
+        r"\s*[:\-]?\s*(?:Rs\.?|₹)?\s*"
+        r"([\d,]+(?:\.\d+)?)\s*(?:lakh|lac)?",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    value = float(match.group(1).replace(",", ""))
+    if re.search(r"\b(?:lakh|lac)\b", match.group(0), re.IGNORECASE):
+        value *= 100000
+    return value
+
+
 def _parse_opening_bid(text: str):
     """Parse an opening/start bid only when the notice labels it explicitly."""
     match = re.search(
@@ -173,6 +191,7 @@ def extract_pnb_property(text: str) -> dict:
         "area_sqft": _parse_area_sqft(text),
         "opening_bid": _parse_opening_bid(text),
         "reserve_price": reserve_price,
+        "emd": _parse_emd(text),
         "auction_date": _parse_date(text),
         "property_type": "Residential Property",
         "survey_number": _parse_survey_number(text),

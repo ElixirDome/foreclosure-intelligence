@@ -356,21 +356,8 @@ function PropertyDetails() {
           </div>
 
           <div>
-            <strong>Reserve price</strong>
-            <span>{formatINR(property.reserve_price)}</span>
-          </div>
-
-          <div>
-            <strong>EMD</strong>
-            <span>{formatINR(property.emd)}</span>
-          </div>
-          <div className="analysis-card">
-            <strong>Valuation confidence</strong>
-            <span>
-              {analysis?.valuation_confidence != null
-                ? `${(analysis.valuation_confidence * 100).toFixed(0)}%`
-                : "N/A"}
-            </span>
+            <strong>City / locality</strong>
+            <span>{[property.locality, property.city].filter(Boolean).join(", ") || "N/A"}</span>
           </div>
         </div>
       </div>
@@ -385,12 +372,21 @@ function PropertyDetails() {
         {!analysisLoading && analysis && (
           <div className="analysis-grid">
             <div className="analysis-card">
-              <strong>Estimated value</strong>
+              <strong>Estimated market value</strong>
               <span>
                 ₹
                 {analysis.estimated_value?.toLocaleString(
                   "en-IN"
                 ) ?? "N/A"}
+              </span>
+            </div>
+
+            <div className="analysis-card">
+              <strong>Valuation confidence</strong>
+              <span>
+                {analysis.valuation_confidence != null
+                  ? `${(analysis.valuation_confidence * 100).toFixed(0)}%`
+                  : "N/A"}
               </span>
             </div>
 
@@ -446,14 +442,6 @@ function PropertyDetails() {
         <div className="deal-intel-signals">
           <h4>Additional signals</h4>
           <div className="analysis-grid">
-            <div className="analysis-card">
-              <strong>Deal score</strong>
-              <span>{dealIntel.deal_score ?? "N/A"}</span>
-            </div>
-            <div className="analysis-card">
-              <strong>Rating</strong>
-              <span>{dealIntel.deal_rating ?? "N/A"}</span>
-            </div>
             <div className="analysis-card">
               <strong>Comparables</strong>
               <span>{dealIntel.comparable_count}</span>
