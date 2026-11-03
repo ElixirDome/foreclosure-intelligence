@@ -233,6 +233,8 @@ class BankNetSourceAdapter(SourceAdapter):
             if value.startswith("//"):
                 value = "https:" + value
             elif not value.startswith(("https://", "http://")):
+                if ":" in value.split("/", 1)[0]:
+                    continue
                 value = f"{CDN_BASE}/{value.lstrip('/')}"
             if value.startswith("https://") and value not in urls:
                 urls.append(value)

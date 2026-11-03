@@ -33,7 +33,7 @@ interface Property {
   deal_score: number | null;
   sources?: PropertySource[];
   bank_name?: string | null; branch_name?: string | null; possession_type?: string | null;
-  property_unique_id?: string | null; auction_id?: string | null; property_images?: string[];
+  property_unique_id?: string | null; auction_id?: string | null; property_images?: string[] | null;
   auction_start?: string | null; auction_end?: string | null; emd_deadline?: string | null;
   inspection_start?: string | null; inspection_end?: string | null; listing_url?: string | null;
   district?: string | null; state?: string | null;
@@ -124,17 +124,6 @@ function Dashboard() {
       setSearch(prefs.district || prefs.city || "");
     }
     loadProperties();
-  }
-
-  // Copy Link State
-  const [copiedId, setCopiedId] = useState<number | null>(null);
-
-  function handleCopyLink(id: number, e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    navigator.clipboard.writeText(`${window.location.origin}/properties/${id}`);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
   }
 
   function handleLogout() {

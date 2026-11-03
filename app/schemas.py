@@ -66,7 +66,7 @@ class PropertyResponse(BaseModel):
     raw_status: str | None = None
     property_unique_id: str | None = None
     auction_id: str | None = None
-    property_images: list[str] = Field(default_factory=list)
+    property_images: list[str] | None = None
     inspection_start: datetime | None = None
     inspection_end: datetime | None = None
     emd_deadline: datetime | None = None
