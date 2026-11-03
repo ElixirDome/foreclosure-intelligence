@@ -478,16 +478,31 @@ def retrieve_deal_context(
         factors = "\n".join(
             f"{f.direction} {f.label}" for f in deal.factors
         )
+        discount_label = (
+            f"{deal.discount_percentage}%"
+            if deal.discount_percentage is not None
+            else "Not available"
+        )
+        discount_amount_label = (
+            f"₹{deal.discount_amount:,.0f}"
+            if deal.discount_amount is not None
+            else "Not available"
+        )
+        price_per_sqft_label = (
+            f"₹{deal.price_per_sqft:,.0f}"
+            if deal.price_per_sqft is not None
+            else "Not available"
+        )
         text = (
             f"Deal assessment for property {pid}.\n"
             f"Deal score: {deal.deal_score} out of 100.\n"
             f"Deal rating: {deal.deal_rating or 'Not available'}.\n"
-            f"Discount against estimated market value: {deal.discount_percentage}%.\n"
-            f"Estimated discount amount: ₹{deal.discount_amount:,.0f}.\n"
-            f"Price per square foot: ₹{deal.price_per_sqft:,.0f}.\n"
+            f"Discount against estimated market value: {discount_label}.\n"
+            f"Estimated discount amount: {discount_amount_label}.\n"
+            f"Price per square foot: {price_per_sqft_label}.\n"
             f"Risk level: {deal.risk_level}.\n"
-            f"Bank opening bid: {deal.opening_bid}.\n"
-            f"Comparable-based market estimate: {deal.estimated_value}.\n"
+            f"Bank opening bid: {deal.opening_bid if deal.opening_bid is not None else 'Not recorded'}.\n"
+            f"Comparable-based market estimate: {deal.estimated_value if deal.estimated_value is not None else 'Not available'}.\n"
             f"Comparables used: {deal.comparable_count}.\n"
             f"Factors: {factors or 'No additional factors recorded'}.\n"
             f"Explanation: {deal.explanation}"
