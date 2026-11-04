@@ -1,0 +1,173 @@
+{
+  "evaluation_timestamp": "2026-11-03T04:03:21.005591+00:00",
+  "total_benchmark_samples": 12,
+  "metrics": {
+    "rag_triad": {
+      "faithfulness": 0.8557,
+      "answer_relevance": 0.9443,
+      "context_precision": 0.9444,
+      "context_recall": 1.0
+    },
+    "retrieval_performance": {
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 0.9167,
+      "ndcg_at_5": 0.9456
+    },
+    "safety_and_alignment": {
+      "hallucination_rate": 0.0,
+      "negative_refusal_accuracy": 1.0
+    },
+    "latency_sla": {
+      "mean_latency_ms": 4.84,
+      "p50_latency_ms": 4.0,
+      "p95_latency_ms": 11.49,
+      "p99_latency_ms": 12.58
+    }
+  },
+  "per_sample_results": [
+    {
+      "sample_id": "eval_val_01",
+      "faithfulness": 0.8462,
+      "answer_relevance": 0.84,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 0.5,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 10.38
+    },
+    {
+      "sample_id": "eval_val_02",
+      "faithfulness": 0.8462,
+      "answer_relevance": 0.9,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 1.0,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 4.72
+    },
+    {
+      "sample_id": "eval_fin_01",
+      "faithfulness": 0.8182,
+      "answer_relevance": 0.92,
+      "context_precision": 0.8333,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 1.0,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 12.85
+    },
+    {
+      "sample_id": "eval_fin_02",
+      "faithfulness": 0.8182,
+      "answer_relevance": 0.96,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 1.0,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 3.15
+    },
+    {
+      "sample_id": "eval_rep_01",
+      "faithfulness": 0.8,
+      "answer_relevance": 0.92,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 1.0,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 9.43
+    },
+    {
+      "sample_id": "eval_rep_02",
+      "faithfulness": 0.8,
+      "answer_relevance": 0.888,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 1.0,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 3.59
+    },
+    {
+      "sample_id": "eval_doc_01",
+      "faithfulness": 0.875,
+      "answer_relevance": 0.92,
+      "context_precision": 0.5,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 0.5,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 2.27
+    },
+    {
+      "sample_id": "eval_disc_01",
+      "faithfulness": 0.75,
+      "answer_relevance": 0.984,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 1.0,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 4.42
+    },
+    {
+      "sample_id": "eval_onb_01",
+      "faithfulness": 0.7143,
+      "answer_relevance": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 1.0,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 1.17
+    },
+    {
+      "sample_id": "eval_neg_01",
+      "faithfulness": 1.0,
+      "answer_relevance": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 1.0,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 4.63
+    },
+    {
+      "sample_id": "eval_neg_02",
+      "faithfulness": 1.0,
+      "answer_relevance": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 1.0,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 0.88
+    },
+    {
+      "sample_id": "eval_neg_03",
+      "faithfulness": 1.0,
+      "answer_relevance": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "hit_rate_at_3": 1.0,
+      "mrr_at_5": 1.0,
+      "hallucination_rate": 0.0,
+      "negative_refusal_correct": true,
+      "latency_ms": 0.56
+    }
+  ]
+}

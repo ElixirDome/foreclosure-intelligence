@@ -15,7 +15,12 @@ if not DATABASE_URL:
         "DATABASE_URL is not configured"
     )
 
-engine = create_engine(DATABASE_URL) # the DBconnection itself
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=20,
+    max_overflow=40,
+    pool_pre_ping=True,
+) # the DBconnection itself
 #engine holds the actual connection config (URL, credentials, pool settings
 
 Base= declarative_base()

@@ -1,51 +1,77 @@
-import { useState } from "react";
-import type { FormEvent } from "react";
+import { useState, useRef, useEffect } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { analyzeInvestment, askRag } from "../api/rag";
 import type { RAGResponse } from "../api/types";
-import RagResult from "../components/RagResult";
 
-const GENERAL = [
-  "Which residential lots look most discounted?",
-  "What risks should I watch before bidding?",
-  "Summarize upcoming auctions on the desk",
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  structured?: RAGResponse["structured"];
+  citations?: RAGResponse["citations"];
+  timestamp: string;
+}
+
+const QUICK_PROMPTS = [
+  "Which residential lots have the highest estimated discount?",
+  "What legal risks should I verify before bidding on SARFAESI lots?",
+  "Summarize the latest PNB e-auction properties on the desk",
+  "How are market comparables calculated for valuation?",
 ];
 
-const ABOUT_PROPERTY = [
-  "Is this a good investment?",
-  "On what basis was this property evaluated?",
-  "What should I check before bidding?",
+const PROPERTY_PROMPTS = [
+  "Is this property a good investment opportunity?",
+  "What was the basis for this property's valuation?",
+  "What due diligence checks should I complete before bidding?",
 ];
-
-type Turn =
-  | { role: "user"; text: string }
-  | { role: "assistant"; result: RAGResponse };
 
 export default function Research() {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const propertyIdParam = params.get("property_id");
   const propertyId = propertyIdParam ? Number(propertyIdParam) : null;
 
-  const [question, setQuestion] = useState("");
+  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [turns, setTurns] = useState<Turn[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const suggestions = propertyId ? ABOUT_PROPERTY : GENERAL;
+  const prompts = propertyId ? PROPERTY_PROMPTS : QUICK_PROMPTS;
 
-  async function runAsk(text: string) {
+  function scrollToBottom() {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, loading]);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  async function sendMessage(text: string) {
     const q = text.trim();
     if (!q || loading) return;
-    setQuestion("");
-    setError("");
-    setTurns((t) => [...t, { role: "user", text: q }]);
+
+    const userMsg: ChatMessage = {
+      id: "u_" + Date.now(),
+      role: "user",
+      text: q,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
     setLoading(true);
+
     try {
       let data: RAGResponse;
-      const invest =
-        /\b(invest|good buy|evaluat|basis|deal|worth)\b/i.test(q) && propertyId;
+      const isInvestQuery =
+        /\b(invest|good buy|evaluat|basis|deal|worth)\b/i.test(q) && propertyId != null;
 
-      if (invest && propertyId) {
+      if (isInvestQuery && propertyId != null) {
         data = await analyzeInvestment({
           property_id: propertyId,
           question: q,
@@ -58,12 +84,27 @@ export default function Research() {
           limit: 8,
         });
       }
-      setTurns((t) => [...t, { role: "assistant", result: data }]);
-    } catch (err) {
-      console.error(err);
-      setError(
-        "Could not answer that. Check that you are logged in and the API is running.",
-      );
+
+      const botText = data.answer || data.structured?.summary || "No response generated.";
+      const botMsg: ChatMessage = {
+        id: "a_" + Date.now(),
+        role: "assistant",
+        text: botText,
+        structured: data.structured,
+        citations: data.citations,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+
+      setMessages((prev) => [...prev, botMsg]);
+    } catch (err: any) {
+      console.error("RAG Error:", err);
+      const errMsg: ChatMessage = {
+        id: "err_" + Date.now(),
+        role: "assistant",
+        text: "I encountered an error retrieving data. Please ensure the backend is running and you are logged in.",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+      setMessages((prev) => [...prev, errMsg]);
     } finally {
       setLoading(false);
     }
@@ -71,75 +112,198 @@ export default function Research() {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    void runAsk(question);
+    void sendMessage(input);
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void sendMessage(input);
+    }
+  }
+
+  function clearChat() {
+    setMessages([]);
+    setInput("");
+  }
+
+  function clearScope() {
+    params.delete("property_id");
+    setParams(params);
   }
 
   return (
-    <div className="page desk-page">
-      <nav className="navbar">
-        <Link to="/dashboard">Desk</Link>
-        <Link to="/research">Research</Link>
-        <Link to="/admin/import">Import</Link>
-      </nav>
+    <div className="ai-chat-page">
+      {/* Minimalist Header */}
+      <header className="ai-chat-header">
+        <div className="ai-chat-header-left">
+          <Link to="/dashboard" className="ai-back-link">
+            ← Desk
+          </Link>
+          <div className="ai-title-wrap">
+            <span className="ai-avatar-icon">🤖</span>
+            <div className="ai-title-text">
+              <h2>Research Analyst</h2>
+              <div className="ai-status-indicator">
+                <span className="ai-status-dot"></span>
+                <span>Active · Multi-Source RAG</span>
+              </div>
+            </div>
+          </div>
+        </div>
 
-      <header className="desk-header">
-        <h1>Research</h1>
-        <p className="muted">
-          Ask in plain language. Name a place, or open a property and ask about
-          that lot. There is nothing to configure.
-        </p>
-        {propertyId && (
-          <p className="context-chip">
-            Scoped to property #{propertyId} ·{" "}
-            <Link to={`/properties/${propertyId}`}>Open lot</Link>
-          </p>
-        )}
+        <div className="ai-chat-header-right">
+          {propertyId && (
+            <div className="ai-scope-badge">
+              <span>Scoped to Lot #{propertyId}</span>
+              <button type="button" onClick={clearScope} title="Clear property scope">
+                ✕
+              </button>
+            </div>
+          )}
+
+          {messages.length > 0 && (
+            <button type="button" className="ai-btn-ghost" onClick={clearChat} title="Clear conversation">
+              Clear Chat
+            </button>
+          )}
+
+          <Link to="/admin/import" className="ai-btn-ghost">
+            Bank Sources
+          </Link>
+        </div>
       </header>
 
-      <div className="conversation">
-        {turns.length === 0 && (
-          <p className="muted lead">
-            {propertyId
-              ? "Ask whether this lot is worth a closer look, how it was valued, or what to check before bidding."
-              : "Try a desk-wide question, or open a property first for a tighter answer."}
-          </p>
-        )}
-
-        {turns.map((turn, i) =>
-          turn.role === "user" ? (
-            <p key={i} className="user-turn">
-              {turn.text}
+      {/* Main Chat Stream */}
+      <main className="ai-chat-body">
+        {messages.length === 0 && (
+          <div className="ai-empty-hero">
+            <div className="ai-empty-icon">⚡</div>
+            <h3>How can I help with your foreclosure analysis?</h3>
+            <p>
+              Ask about property valuation, auction terms, reserve prices, or comparative market data.
             </p>
-          ) : (
-            <RagResult key={i} result={turn.result} />
-          ),
+
+            <div className="ai-prompt-grid">
+              {prompts.map((p, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  className="ai-prompt-chip"
+                  onClick={() => void sendMessage(p)}
+                >
+                  <span className="ai-prompt-arrow">↳</span>
+                  <span>{p}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
-        {loading && <p className="muted">Looking at what is on file…</p>}
-        {error && <p className="error-text">{error}</p>}
-      </div>
+        <div className="ai-messages-list">
+          {messages.map((m) => (
+            <div key={m.id} className={`ai-message-row ${m.role}`}>
+              {m.role === "assistant" && (
+                <div className="ai-bot-avatar">🤖</div>
+              )}
 
-      {turns.length === 0 && (
-        <div className="suggestion-row">
-          {suggestions.map((s) => (
-            <button key={s} type="button" className="chip" onClick={() => void runAsk(s)}>
-              {s}
-            </button>
+              <div className="ai-message-bubble">
+                <div className="ai-message-content">
+                  <p>{m.text}</p>
+
+                  {m.structured && (
+                    <div className="ai-structured-note">
+                      {m.structured.strengths && m.structured.strengths.length > 0 && (
+                        <div className="ai-note-block positive">
+                          <strong>Supporting Factors:</strong>
+                          <ul>
+                            {m.structured.strengths.map((s, idx) => (
+                              <li key={idx}>{s}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {m.structured.risks && m.structured.risks.length > 0 && (
+                        <div className="ai-note-block negative">
+                          <strong>Risk Factors:</strong>
+                          <ul>
+                            {m.structured.risks.map((r, idx) => (
+                              <li key={idx}>{r}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {m.structured.recommendation && (
+                        <div className="ai-note-block recommendation">
+                          <strong>Bottom Line:</strong> {m.structured.recommendation}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {m.citations && m.citations.length > 0 && (
+                    <div className="ai-citations-strip">
+                      <span className="ai-citation-label">Sources:</span>
+                      {m.citations.slice(0, 4).map((c, idx) => (
+                        <span key={idx} className="ai-citation-pill" title={c.excerpt || c.title || undefined}>
+                          📄 {c.title || c.source_name || "Notice"}
+                          {c.page_number != null ? ` (p.${c.page_number})` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <span className="ai-timestamp">{m.timestamp}</span>
+              </div>
+            </div>
           ))}
-        </div>
-      )}
 
-      <form className="ask-bar" onSubmit={handleSubmit}>
-        <input
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder={propertyId ? "Ask about this lot" : "Ask a question"}
-          aria-label="Question"
-        />
-        <button type="submit" disabled={loading || !question.trim()}>
-          Ask
-        </button>
-      </form>
+          {loading && (
+            <div className="ai-message-row assistant">
+              <div className="ai-bot-avatar">🤖</div>
+              <div className="ai-message-bubble loading-bubble">
+                <div className="ai-typing-dots">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+      </main>
+
+      {/* Floating Modern Input Bar */}
+      <footer className="ai-input-dock">
+        <form className="ai-input-bar" onSubmit={handleSubmit}>
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              propertyId
+                ? `Ask about Lot #${propertyId} (e.g. reserve price, comparables, risks)...`
+                : "Ask anything about auction inventory, legal risks, or valuations..."
+            }
+            disabled={loading}
+          />
+          <button
+            type="submit"
+            className="ai-send-btn"
+            disabled={loading || !input.trim()}
+            title="Send Message"
+          >
+            ↑
+          </button>
+        </form>
+      </footer>
     </div>
   );
 }

@@ -79,6 +79,8 @@ def fake_llm_provider():
 
 @pytest.fixture
 def db():
+    Base.metadata.drop_all(bind=test_engine)
+    Base.metadata.create_all(bind=test_engine)
     db = TestingSessionLocal()
     yield db
     db.close()

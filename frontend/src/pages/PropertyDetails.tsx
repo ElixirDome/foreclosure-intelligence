@@ -5,6 +5,7 @@ import { analyzeInvestment, getPropertyEvidence, getPropertyDeal } from "../api/
 import type { EvidenceItem, DealIntelligence, RAGResponse } from "../api/types";
 import RagResult from "../components/RagResult";
 import type { DocumentItem } from "../api/types";
+import { useAnalyst } from "../context/AnalystContext";
 
 function formatINR(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === "") return "N/A";
@@ -73,6 +74,7 @@ interface PropertyAnalysis {
 
 function PropertyDetails() {
   const { id } = useParams();
+  const { openAnalyst } = useAnalyst();
 
   const [property, setProperty] = useState<Property | null>(null);
   const [analysis, setAnalysis] = useState<PropertyAnalysis | null>(null);
@@ -96,6 +98,28 @@ function PropertyDetails() {
   const [documentsLoading, setDocumentsLoading] = useState(true);
   const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
   const [dealIntel, setDealIntel] = useState<DealIntelligence | null>(null);
+
+  const [favorites, setFavorites] = useState<number[]>(() => {
+    try {
+      const saved = localStorage.getItem("fc_favorites");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const isFavorited = id ? favorites.includes(Number(id)) : false;
+
+  function toggleFavorite() {
+    if (!id) return;
+    const numId = Number(id);
+    setFavorites((prev) => {
+      const next = prev.includes(numId) ? prev.filter((item) => item !== numId) : [...prev, numId];
+      localStorage.setItem("fc_favorites", JSON.stringify(next));
+      return next;
+    });
+  }
+
 
 
 
@@ -299,9 +323,33 @@ function PropertyDetails() {
         <p className="error">
           {error || "Property not found."}
         </p>
-        <div className="navbar">
-        <Link to="/dashboard">← Properties</Link>
-        <Link to="/research">Research</Link>
+        <div className="navbar" style={{ justifyContent: "space-between" }}>
+        <div style={{ display: "flex", gap: 12 }}>
+          <Link to="/dashboard">← Back to Feed</Link>
+          <Link to="/research">Research AI</Link>
+          <Link to="/admin/import">Bank Sources</Link>
+        </div>
+
+        <button
+          type="button"
+          onClick={toggleFavorite}
+          style={{
+            background: isFavorited ? "#f43f5e" : "var(--bg-surface)",
+            color: isFavorited ? "#ffffff" : "var(--text-primary)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 999,
+            padding: "8px 16px",
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            transition: "all 0.2s ease",
+          }}
+        >
+          <span>{isFavorited ? "❤️ Saved to Favorites" : "🤍 Save to Favorites"}</span>
+        </button>
       </div>
       </div>
     );
@@ -309,68 +357,81 @@ function PropertyDetails() {
 
   return (
     <div className="page">
-      <div className="navbar">
-        <Link to="/dashboard">← Properties</Link>
-        <Link to="/research">Research</Link>
-      </div>
-
-      <div className="details-container">
-        <div className="card-top">
-          <span className="status">
-            {property.foreclosure_status ?? "Unknown"}
-          </span>
-
-          {analysis?.deal_score !== null &&
-            analysis?.deal_score !== undefined && (
-              <span className="score">
-                Deal score: {analysis.deal_score}
-              </span>
-            )}
+      <div className="navbar" style={{ justifyContent: "space-between" }}>
+        <div style={{ display: "flex", gap: 12 }}>
+          <Link to="/dashboard">← Back to Feed</Link>
+          <Link to="/research">Research AI</Link>
+          <Link to="/admin/import">Bank Sources</Link>
         </div>
 
-        <h1>{property.address}</h1>
+        <button
+          type="button"
+          onClick={toggleFavorite}
+          style={{
+            background: isFavorited ? "#f43f5e" : "var(--bg-surface)",
+            color: isFavorited ? "#ffffff" : "var(--text-primary)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 999,
+            padding: "8px 16px",
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            transition: "all 0.2s ease",
+          }}
+        >
+          <span>{isFavorited ? "❤️ Saved to Favorites" : "🤍 Save to Favorites"}</span>
+        </button>
+      </div>
 
-        <div className="info-grid">
-          <div>
-            <strong>Property type</strong>
-            <span>{property.property_type ?? "N/A"}</span>
-          </div>
-
-          <div>
-            <strong>Area</strong>
-            <span>
-              {property.area_sqft
-                ? `${property.area_sqft} sq ft`
-                : "N/A"}
+      <div className="bn-detail-hero">
+        <div className="bn-detail-meta-bar">
+          <span className="bn-bank-badge">
+            🏦 BAANKNET LOT #{property.id}
+          </span>
+          <div className="bn-ribbon-badges">
+            <span className="bn-pill bn-pill-type">
+              🏡 {property.property_type ?? "Property"}
             </span>
-          </div>
-
-          <div>
-            <strong>Survey number</strong>
-            <span>{property.survey_number ?? "N/A"}</span>
-          </div>
-
-          <div>
-            <strong>Auction date</strong>
-            <span>{property.auction_date ?? "N/A"}</span>
-          </div>
-
-          <div>
-            <strong>Reserve price</strong>
-            <span>{formatINR(property.reserve_price)}</span>
-          </div>
-
-          <div>
-            <strong>EMD</strong>
-            <span>{formatINR(property.emd)}</span>
-          </div>
-          <div className="analysis-card">
-            <strong>Valuation confidence</strong>
-            <span>
-              {analysis?.valuation_confidence != null
-                ? `${(analysis.valuation_confidence * 100).toFixed(0)}%`
-                : "N/A"}
+            {property.auction_date && (
+              <span className="bn-pill bn-pill-auction-date">
+                📅 Auction: {property.auction_date}
+              </span>
+            )}
+            <span className="bn-pill bn-pill-possession">
+              🛡️ {property.foreclosure_status === "scheduled" ? "SARFAESI Scheduled" : (property.foreclosure_status ?? "Active")}
             </span>
+            {analysis?.deal_score != null && (
+              <span className="bn-pill" style={{ background: "#f5f3ff", color: "#6d28d9", border: "1px solid #ddd6fe" }}>
+                ⭐ Deal score: {analysis.deal_score}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <h1 className="bn-detail-title">{property.address}</h1>
+
+        <div className="bn-detail-kpi-ribbon">
+          <div className="bn-detail-kpi-item">
+            <span>Reserve Price</span>
+            <strong style={{ color: "#0b1f3a" }}>{formatINR(property.reserve_price)}</strong>
+          </div>
+
+          <div className="bn-detail-kpi-item">
+            <span>EMD (10%)</span>
+            <strong style={{ color: "#1d4ed8" }}>{formatINR(property.emd)}</strong>
+          </div>
+
+          <div className="bn-detail-kpi-item">
+            <span>Super Built-up / Land Area</span>
+            <strong>{property.area_sqft ? `${property.area_sqft.toLocaleString()} sq ft` : "As per notice"}</strong>
+          </div>
+
+          <div className="bn-detail-kpi-item">
+            <span>Survey / Khasra No</span>
+            <strong>{property.survey_number ?? "Refer Title"}</strong>
           </div>
         </div>
       </div>
@@ -533,12 +594,18 @@ function PropertyDetails() {
           >
             {investmentLoading ? "Looking at the file…" : "Write investment note"}
           </button>
+          <button
+            type="button"
+            className="desk-btn-primary"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, fontSize: 13 }}
+            onClick={() => openAnalyst(Number(id), property?.address, "Is this property a good foreclosure investment?")}
+          >
+            🤖 Open Contextual Research Analyst
+          </button>
         </div>
         <p className="muted">
           Uses the notice, evidence, comparables, and valuations already stored
           for this lot. Supporting excerpts stay under View evidence.
-          {" "}
-          <Link to={`/research?property_id=${id}`}>Open in Research →</Link>
         </p>
         {investmentError && <p className="error">{investmentError}</p>}
         {investmentResult && <RagResult result={investmentResult} />}

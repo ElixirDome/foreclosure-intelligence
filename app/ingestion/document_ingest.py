@@ -94,17 +94,25 @@ def extract_pages_from_source(
             except Exception:
                 pass
 
-    # PDF bytes in memory
+       # PDF bytes in memory
     if isinstance(doc.content, (bytes, bytearray)) and doc.content:
         if "pdf" in mime or doc.content[:4] == b"%PDF":
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=True) as tmp:
-                tmp.write(doc.content)
-                tmp.flush()
-                return extract_pages_from_pdf(tmp.name)
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    suffix=".pdf",
+                    delete=False,
+                ) as tmp:
+                    tmp.write(doc.content)
+                    tmp_path = Path(tmp.name)
+
+                return extract_pages_from_pdf(tmp_path)
+            finally:
+                if tmp_path is not None:
+                    tmp_path.unlink(missing_ok=True)
+
         # Treat other binary as opaque — no text pages yet (OCR later)
         return []
-
-    return []
 
 
 def ingest_document(
@@ -129,6 +137,9 @@ def ingest_document(
 
     if pages is None:
         pages = extract_pages_from_source(source)
+    if pages is None:
+        raw_text = getattr(source, "extracted_text", None) or getattr(raw, "extracted_text", None)
+        pages = [raw_text] if raw_text else []
 
     extracted_text = "\n\n".join(
         p.strip() for p in pages if p and p.strip()
