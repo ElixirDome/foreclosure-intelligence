@@ -63,10 +63,24 @@ def _hashed_embedding(text: str, dim: int = VECTOR_DIM) -> list[float]:
     return [value / norm for value in vector]
 
 
-def _ollama_embedding(text: str) -> list[float]:
+def _format_nomic_input(text: str, task: str = "document") -> str:
+    """Format input text with task-specific prefix for nomic-embed-text models."""
+    clean = text.strip()
+    if clean.startswith("search_query:") or clean.startswith("search_document:"):
+        return clean
+    if task in ("query", "search_query"):
+        return f"search_query: {clean}"
+    return f"search_document: {clean}"
+
+
+def _ollama_embedding(text: str, task: str = "document") -> list[float]:
+    input_text = text
+    if "nomic" in OLLAMA_EMBEDDING_MODEL.lower():
+        input_text = _format_nomic_input(text, task=task)
+
     response = requests.post(
         f"{OLLAMA_BASE_URL}/api/embed",
-        json={"model": OLLAMA_EMBEDDING_MODEL, "input": text},
+        json={"model": OLLAMA_EMBEDDING_MODEL, "input": input_text},
         timeout=(1.0, 5.0),
     )
     response.raise_for_status()
@@ -82,12 +96,13 @@ def _ollama_embedding(text: str) -> list[float]:
     return [value / norm for value in vector]
 
 
-def embed_text(text: str, dim: int = VECTOR_DIM) -> list[float]:
+def embed_text(text: str, dim: int = VECTOR_DIM, task: str = "document") -> list[float]:
     """Embed text semantically when configured; otherwise use stable feature hashing.
 
     Configure OLLAMA_EMBEDDING_MODEL (for example, nomic-embed-text) to use
-    Ollama's /api/embed endpoint. If the model/server is unavailable, the
-    process falls back to stable hashing rather than failing ingestion.
+    Ollama's /api/embed endpoint. Task prefixes ('search_document: ' / 'search_query: ')
+    are automatically applied for nomic models. If the model/server is unavailable,
+    the process falls back to stable hashing rather than failing ingestion.
     """
     global _OLLAMA_UNAVAILABLE
 
@@ -96,7 +111,7 @@ def embed_text(text: str, dim: int = VECTOR_DIM) -> list[float]:
 
     if OLLAMA_EMBEDDING_MODEL and not _OLLAMA_UNAVAILABLE:
         try:
-            return _ollama_embedding(text)
+            return _ollama_embedding(text, task=task)
         except Exception as exc:
             _OLLAMA_UNAVAILABLE = True
             logger.warning(

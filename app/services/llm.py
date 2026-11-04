@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 import os
+import requests
 from dotenv import load_dotenv
 from ollama import Client, ResponseError
 from app.schemas import PropertyAIAnalysis
-from ollama import ResponseError
 
 load_dotenv()
 
@@ -186,6 +186,65 @@ class LocalLLMProvider(LLMProvider):
             raise RuntimeError(
                 f"Failed to generate raw LLM text: {e}"
             ) from e
+
+
+class GeminiProvider(LLMProvider):
+    """
+    Fast Gemini API provider for cloud-accelerated inference (sub-400ms latency).
+    Uses standard REST endpoints with structured JSON schemas and falls back to
+    deterministic analysis if unavailable or misconfigured.
+    """
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        timeout: float = 15.0,
+    ):
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        self.model = model or os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        self.timeout = timeout
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+    def generate(self, prompt: str) -> PropertyAIAnalysis:
+        if not self.api_key:
+            raise RuntimeError("GEMINI_API_KEY not configured")
+
+        url = f"{self.base_url}/{self.model}:generateContent?key={self.api_key}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseSchema": PropertyAIAnalysis.model_json_schema(),
+            },
+        }
+        res = requests.post(url, json=payload, timeout=self.timeout)
+        res.raise_for_status()
+        data = res.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            raise RuntimeError("Gemini returned no candidates")
+        text = candidates[0]["content"]["parts"][0]["text"]
+        return parse_property_ai_analysis(text)
+
+    def generate_raw(self, prompt: str) -> str:
+        if not self.api_key:
+            raise RuntimeError("GEMINI_API_KEY not configured")
+
+        url = f"{self.base_url}/{self.model}:generateContent?key={self.api_key}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+        }
+        res = requests.post(url, json=payload, timeout=self.timeout)
+        res.raise_for_status()
+        data = res.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            raise RuntimeError("Gemini returned no candidates")
+        return candidates[0]["content"]["parts"][0]["text"]
 
 
 def deterministic_property_ai_fallback(

@@ -24,6 +24,7 @@ class QueryIntent(str, Enum):
     ONBOARDING_GUIDE = "onboarding_guide"
     REPRESENTATIVE_INQUIRY = "representative_inquiry"
     VALUATION_EXPLANATION = "valuation_explanation"
+    VALIDITY_VERIFICATION = "validity_verification"
     STATUS_INQUIRY = "status_inquiry"
     DOCUMENT_RETRIEVAL = "document_retrieval"
     INVENTORY_DISCOVERY = "inventory_discovery"
@@ -361,7 +362,36 @@ def classify_query(
             requires_retrieval=False,
         )
 
-    # 8. Valuation calculation & Comparables explanation (Property specific)
+    # 8. Validity & Detail Verification (e.g. "are the details valid", "is it verified", "safe to bid", "can i trust")
+    is_validity_query = bool(
+        re.search(
+            r"\b(?:are\s+the\s+details\s+valid|is\s+it\s+valid|is\s+this\s+valid|validity|is\s+(?:it|this|the\s+property)\s+verified|is\s+(?:it|this)\s+safe\s+to\s+bid|can\s+i\s+trust|are\s+(?:the|these)\s+details\s+accurate|verify\s+(?:the\s+)?details|check\s+validity)\b",
+            q_lower,
+        )
+        or any(k in q_lower for k in ["valid details", "details valid", "legit property", "safe to bid", "validity check"])
+    )
+    if is_validity_query:
+        if resolved_prop_id:
+            return QueryUnderstandingResult(
+                intent=QueryIntent.VALIDITY_VERIFICATION,
+                cleaned_query=q_clean,
+                property_id=resolved_prop_id,
+                requires_retrieval=False,
+            )
+        return QueryUnderstandingResult(
+            intent=QueryIntent.FOLLOW_UP,
+            cleaned_query=q_clean,
+            property_id=None,
+            direct_answer=(
+                "To verify property details, reserve price, and legal possession status, "
+                "please specify the property lot number (e.g. *'Are the details valid for Lot #1?'*) "
+                "or select a property from the dashboard."
+            ),
+            action_links=[{"title": "Open Filtered Dashboard", "url": "/dashboard"}],
+            requires_retrieval=False,
+        )
+
+    # 9. Valuation calculation & Comparables explanation (Property specific)
     if resolved_prop_id and any(k in q_lower for k in [
         "valu", "estimat", "how was", "calculated", "comparable", "market value",
         "reliable", "basis", "worth",
@@ -373,7 +403,7 @@ def classify_query(
             requires_retrieval=False,
         )
 
-    # 9. Status, EMD, Reserve Price, and Auction Date inquiry (Property specific)
+    # 10. Status, EMD, Reserve Price, and Auction Date inquiry (Property specific)
     if resolved_prop_id and any(k in q_lower for k in [
         "status", "emd", "reserve", "bank", "when is", "date", "superseded",
         "withdrawn", "cancelled", "sold", "missing", "verified",
@@ -385,7 +415,7 @@ def classify_query(
             requires_retrieval=False,
         )
 
-    # 10. Original Notice Document inquiry (Property specific)
+    # 11. Original Notice Document inquiry (Property specific)
     if resolved_prop_id and any(k in q_lower for k in [
         "notice", "document", "pdf", "original", "published", "checked", "download",
     ]):
@@ -396,7 +426,7 @@ def classify_query(
             requires_retrieval=False,
         )
 
-    # 11. Follow-up resolution when property_id is missing for property-scoped questions
+    # 12. Follow-up resolution when property_id is missing for property-scoped questions
     if resolved_prop_id is None and any(k in q_lower for k in [
         "what about the emd", "what is the emd", "reserve price", "when is the auction",
         "how was it calculated", "show the notice", "who is the officer", "is this a good deal",
@@ -413,11 +443,27 @@ def classify_query(
             requires_retrieval=False,
         )
 
-    # 12. Inventory Discovery / Location-Aware Search
-    if any(k in q_lower for k in [
+    # 13. Inventory Discovery / Location-Aware Search / Best Property Discovery
+    indian_states = [
+        "punjab", "haryana", "delhi", "maharashtra", "karnataka", "tamil nadu",
+        "gujarat", "rajasthan", "uttar pradesh", "west bengal", "kerala",
+        "telangana", "andhra", "madhya pradesh", "bihar", "odisha", "chandigarh",
+    ]
+    discovery_terms = [
         "recent", "listed", "show", "find", "auctions", "district", "city",
-        "below", "under", "inventory", "search",
-    ]):
+        "below", "under", "inventory", "search", "best property", "best properties",
+        "top deal", "top deals", "highest discount", "cheapest", "recommend",
+        "best auction", "top auction",
+    ]
+    is_discovery = (
+        resolved_prop_id is None
+        and (
+            any(k in q_lower for k in discovery_terms)
+            or ("best" in q_lower and any(w in q_lower for w in ["property", "properties", "lot", "deal", "in"]))
+            or (any(state in q_lower for state in indian_states) and any(w in q_lower for w in ["property", "properties", "auction", "auctions", "deal", "deals", "flat", "house", "plot", "lot"]))
+        )
+    )
+    if is_discovery:
         return QueryUnderstandingResult(
             intent=QueryIntent.INVENTORY_DISCOVERY,
             cleaned_query=q_clean,
@@ -425,7 +471,7 @@ def classify_query(
             requires_retrieval=False,
         )
 
-    # 13. General Investigative Underwriting & Multi-Source RAG
+    # 14. General Investigative Underwriting & Multi-Source RAG
     return QueryUnderstandingResult(
         intent=QueryIntent.INVESTIGATIVE_UNDERWRITING,
         cleaned_query=q_clean,

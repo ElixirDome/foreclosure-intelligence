@@ -170,6 +170,10 @@ def process_analyst_turn(
     if u_result.intent == QueryIntent.REPRESENTATIVE_INQUIRY:
         return _handle_representative_inquiry(db, resolved_prop_id, q_clean)
 
+    # 7b. Validity & Verification Audit
+    if u_result.intent == QueryIntent.VALIDITY_VERIFICATION:
+        return _handle_validity_verification(db, resolved_prop_id, q_clean)
+
     # 8. Valuation calculation & Comparables explanation
     if u_result.intent == QueryIntent.VALUATION_EXPLANATION:
         return _handle_valuation_explanation(db, resolved_prop_id, q_clean)
@@ -790,6 +794,213 @@ def _handle_original_document_inquiry(db: Session, property_id: int, question: s
     )
 
 
+def _handle_validity_verification(
+    db: Session,
+    property_id: int | None,
+    question: str,
+) -> AnalystResponse:
+    if property_id is None:
+        return AnalystResponse(
+            question=question,
+            answer=(
+                "### Property Verification & Detail Validity\n\n"
+                "To verify property details, reserve price, OCR extraction confidence, and SARFAESI possession status, "
+                "please specify the property lot number:\n"
+                "- E.g.: *\"Are the details valid for Lot #1?\"*\n"
+                "- Or click **Ask Analyst** on any property card from the dashboard."
+            ),
+            intent="validity_verification",
+            action_links=[{"title": "Open Filtered Dashboard", "url": "/dashboard"}],
+        )
+
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+            intent="validity_verification",
+            action_links=[{"title": "Open Dashboard", "url": "/dashboard"}],
+        )
+
+    # Retrieve linked evidence records
+    evidence_rows = db.query(Evidence).filter(Evidence.property_id == property_id).all()
+    evidence_by_field: dict[str, Evidence] = {e.field: e for e in evidence_rows}
+
+    # Retrieve linked source notices
+    pdocs = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).all()
+    doc_ids = [pd.document_id for pd in pdocs]
+    docs = db.query(Document).filter(Document.id.in_(doc_ids)).all() if doc_ids else []
+
+    # Deal intelligence & valuation sanity
+    deal = build_deal_intelligence(db, property_id)
+
+    citations: list[Citation] = []
+    action_links: list[dict[str, str]] = [
+        {"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"}
+    ]
+
+    lines = [
+        f"### Detail Validity & Verification Audit for Lot #{prop.id}",
+        f"**Property Address**: {prop.address} ({prop.city or 'General'})",
+        f"**Asset Category**: {prop.property_type or 'Residential Property'}",
+        "",
+        "#### 1. Official Data & OCR Extraction Provenance",
+    ]
+
+    # Reserve price verification
+    rp_ev = evidence_by_field.get("reserve_price")
+    if prop.reserve_price is not None:
+        rp_formatted = f"₹{float(prop.reserve_price):,.0f}"
+        if rp_ev:
+            conf_pct = f"{float(rp_ev.confidence) * 100:.0f}%" if rp_ev.confidence else "High"
+            lines.append(
+                f"- **Reserve Price**: `{rp_formatted}` — ✅ **Verified** ({conf_pct} OCR confidence). Source excerpt: *\"{rp_ev.source_text or rp_ev.value}\"*"
+            )
+        else:
+            lines.append(f"- **Reserve Price**: `{rp_formatted}` — ℹ️ Published in auction record.")
+    else:
+        lines.append("- **Reserve Price**: ⚠️ Pending / unstated in published record.")
+
+    # EMD verification & 10% statutory check
+    emd_ev = evidence_by_field.get("emd")
+    if prop.emd is not None and prop.reserve_price is not None and float(prop.reserve_price) > 0:
+        emd_formatted = f"₹{float(prop.emd):,.0f}"
+        ratio = float(prop.emd) / float(prop.reserve_price)
+        if 0.095 <= ratio <= 0.105:
+            lines.append(
+                f"- **Earnest Money Deposit (EMD)**: `{emd_formatted}` — ✅ **Statutory Compliant** (exactly 10% of Reserve Price under SARFAESI Rule 8(5))."
+            )
+        else:
+            lines.append(
+                f"- **Earnest Money Deposit (EMD)**: `{emd_formatted}` — ℹ️ Non-standard ratio ({ratio * 100:.1f}% of reserve price)."
+            )
+    elif prop.emd is not None:
+        lines.append(f"- **Earnest Money Deposit (EMD)**: `₹{float(prop.emd):,.0f}`")
+    else:
+        lines.append("- **Earnest Money Deposit (EMD)**: ⚠️ Missing from extracted parameters.")
+
+    # Possession type SARFAESI risk check
+    lines.extend([
+        "",
+        "#### 2. Legal Possession Status & Underwriting Risk",
+    ])
+    poss = (prop.possession_type or "").lower().strip()
+    if "symbolic" in poss or "constructive" in poss or "13(4)" in poss:
+        lines.append(
+            "- ⚠️ **High Legal Risk — Symbolic Possession (Section 13(4))**: "
+            "The bank holds legal right to sell under SARFAESI Section 13(4), but has **NOT** executed physical vacant possession under Section 14 (DM/CMM order). "
+            "The borrower or third-party occupants may still physically occupy the premises. Eviction and physical handover timelines rest on the buyer."
+        )
+    elif "physical" in poss or "actual" in poss or "vacant" in poss or "14" in poss:
+        lines.append(
+            "- ✅ **Verified Physical Possession (Section 14)**: "
+            "The secured creditor has obtained physical/vacant custody of the asset. Handover upon full payment is legally and operationally clear."
+        )
+    else:
+        lines.append(
+            "- ⚠️ **Possession Status Unspecified**: "
+            "The auction notice does not explicitly designate whether possession is physical or symbolic. "
+            "**Action Required**: Confirm with the bank's Authorized Officer whether physical vacant possession has been obtained prior to submitting EMD."
+        )
+
+    # Auction timeline check
+    today = date.today()
+    if prop.auction_date:
+        a_date_str = prop.auction_date.strftime("%d %b %Y")
+        if prop.auction_date < today:
+            lines.append(f"- ⚠️ **Auction Date Passed**: Notice date was `{a_date_str}`. Check if lot was sold or if re-auction is scheduled.")
+        else:
+            lines.append(f"- ✅ **Upcoming Auction Date**: Scheduled for `{a_date_str}`.")
+    else:
+        lines.append("- ℹ️ **Auction Date**: Date to be announced or not parsed from primary notice.")
+
+    # Valuation & Market Sanity
+    lines.extend([
+        "",
+        "#### 3. Independent Market Valuation Sanity",
+    ])
+    if deal and deal.comparable_count >= 3 and deal.discount_percentage is not None:
+        lines.append(
+            f"- ✅ **Independent Comparable Grounding**: Validated against **{deal.comparable_count} registered market sales** in {prop.city or 'the vicinity'}. "
+            f"Reserve price reflects a **{deal.discount_percentage:.1f}% discount** vs market benchmark."
+        )
+    else:
+        lines.append(
+            "- ℹ️ **Market Comparables**: Fewer than 3 verified registry comparables are indexed in this micro-locality. "
+            "The reserve price should be cross-verified with local brokers or registrar circle rates."
+        )
+
+    # Notice Document Citations
+    lines.extend([
+        "",
+        "#### 4. Document Provenance & Citing Notice",
+    ])
+    if docs:
+        for doc in docs:
+            lines.append(f"- Official Notice: **{doc.title}** published by **{doc.source_name or 'Bank'}** (Doc #{doc.id})")
+            if doc.source_url:
+                lines.append(f"  - Portal URL: {doc.source_url}")
+            action_links.append({"title": f"Download Notice #{doc.id} PDF", "url": f"/documents/{doc.id}/file"})
+            citations.append(
+                Citation(
+                    kind="document",
+                    source_id=f"doc:{doc.id}:validity",
+                    title=f"Source Notice: {doc.title}",
+                    excerpt=(
+                        f"Official auction notice for Lot #{prop.id} ({prop.address}). "
+                        f"Reserve: ₹{prop.reserve_price or 0:,.0f}, EMD: ₹{prop.emd or 0:,.0f}, "
+                        f"Possession: {prop.possession_type or 'Unstated'}, Bank: {doc.source_name}"
+                    ),
+                    score=1.0,
+                    document_id=doc.id,
+                    property_id=prop.id,
+                    source_name=doc.source_name,
+                )
+            )
+    else:
+        lines.append("- ⚠️ No PDF document is linked to this property in the database.")
+
+    # Add evidence-level citations
+    for ev in evidence_rows:
+        citations.append(
+            Citation(
+                kind="evidence",
+                source_id=f"evidence:{ev.id}:{ev.field}",
+                title=f"Evidence: {ev.field} = {ev.value}",
+                excerpt=f"Extracted field '{ev.field}' with value '{ev.value}' (confidence: {ev.confidence or 1.0}). Excerpt: {ev.source_text or ev.value}",
+                score=float(ev.confidence or 1.0),
+                document_id=ev.document_id,
+                property_id=prop.id,
+                page_number=ev.page_number,
+            )
+        )
+
+    action_links.append({"title": "Open Filtered Dashboard", "url": "/dashboard"})
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="validity_verification",
+    )
+
+
+STATE_CITY_MAP: dict[str, list[str]] = {
+    "punjab": ["gurdaspur", "pathankot", "amritsar", "ludhiana", "jalandhar", "mohali", "bathinda", "patiala", "hoshiarpur", "kapurthala", "batala"],
+    "haryana": ["gurugram", "gurgaon", "faridabad", "panchkula", "ambala", "karnal", "rohtak", "hisar", "sonipat", "panipat"],
+    "delhi": ["delhi", "new delhi", "dwarka", "rohini"],
+    "maharashtra": ["mumbai", "pune", "nagpur", "thane", "nashik", "aurangabad", "navi mumbai"],
+    "uttar pradesh": ["noida", "greater noida", "ghaziabad", "lucknow", "kanpur", "varanasi", "agra", "meerut", "prayagraj"],
+    "karnataka": ["bangalore", "bengaluru", "mysore", "mysuru", "mangalore", "hubli", "belgaum"],
+    "gujarat": ["ahmedabad", "surat", "vadodara", "rajkot", "gandhinagar"],
+    "rajasthan": ["jaipur", "jodhpur", "udaipur", "kota", "bikaner", "ajmer"],
+    "chandigarh": ["chandigarh"],
+}
+
+
 def _handle_discovery_search(
     db: Session,
     question: str,
@@ -813,24 +1024,52 @@ def _handle_discovery_search(
     )
 
     # 2. Extract location constraints from query or user preferences
+    target_state = None
     target_city = None
     target_district = None
 
-    # Check for specific known districts in query
-    for candidate in ["gurdaspur", "pathankot", "amritsar", "ghaziabad", "noida", "ludhiana", "lucknow"]:
+    # Detect state
+    for st_candidate in STATE_CITY_MAP.keys():
+        if st_candidate in q_lower:
+            target_state = st_candidate
+            break
+
+    # Check for specific known cities in query
+    all_known_cities = [
+        "gurdaspur", "pathankot", "amritsar", "ludhiana", "jalandhar", "mohali",
+        "ghaziabad", "noida", "lucknow", "mumbai", "pune", "gurugram", "faridabad",
+        "chandigarh", "delhi", "bangalore",
+    ]
+    for candidate in all_known_cities:
         if candidate in q_lower:
             target_city = candidate.capitalize()
             break
 
-    # If no explicit city in question, fall back to user's onboarding district/city
-    if not target_city and user_pref:
+    # If no explicit city/state in question, fall back to user's onboarding district/city
+    if not target_city and not target_state and user_pref:
         if user_pref.city:
             target_city = user_pref.city
         elif user_pref.district:
             target_district = user_pref.district
 
-    if target_city:
-        query = query.filter(func.lower(Property.city).ilike(f"%{target_city.lower()}%"))
+    if target_state:
+        state_cities = STATE_CITY_MAP.get(target_state, [])
+        state_filters = [
+            func.lower(Property.state).ilike(f"%{target_state}%"),
+            func.lower(Property.address).ilike(f"%{target_state}%"),
+            func.lower(Property.district).ilike(f"%{target_state}%"),
+        ]
+        if state_cities:
+            state_filters.append(func.lower(Property.city).in_(state_cities))
+            state_filters.append(func.lower(Property.address).ilike(f"%{state_cities[0]}%"))
+        query = query.filter(or_(*state_filters))
+    elif target_city:
+        query = query.filter(
+            or_(
+                func.lower(Property.city).ilike(f"%{target_city.lower()}%"),
+                func.lower(Property.address).ilike(f"%{target_city.lower()}%"),
+            )
+        )
     elif target_district:
         query = query.filter(
             or_(
@@ -854,23 +1093,60 @@ def _handle_discovery_search(
         except ValueError:
             pass
 
-    results = query.order_by(Property.auction_date.desc().nullslast(), Property.id.desc()).limit(6).all()
+    # 4. Check if user is asking for "best", "top deals", "highest discount"
+    is_best_query = any(k in q_lower for k in [
+        "best", "top", "deal", "discount", "score", "recommended", "cheapest", "highest discount"
+    ])
 
-    loc_desc = target_city or target_district or "your monitored areas"
+    loc_desc = (target_state.title() if target_state else None) or target_city or target_district or "your monitored areas"
+
+    candidates = query.limit(30).all()
+
+    if is_best_query and candidates:
+        scored: list[tuple[float, float, float, Property, Any]] = []
+        for p in candidates:
+            deal = build_deal_intelligence(db, p.id)
+            score = float(deal.deal_score) if (deal and deal.deal_score is not None) else 0.0
+            disc = float(deal.discount_percentage) if (deal and deal.discount_percentage is not None) else 0.0
+            rp = float(p.reserve_price) if p.reserve_price is not None else 1e9
+            scored.append((score, disc, -rp, p, deal))
+
+        if "cheapest" in q_lower:
+            scored.sort(key=lambda x: -x[2])  # rp ascending
+        else:
+            scored.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+
+        results_with_deal = [(x[3], x[4]) for x in scored[:6]]
+        results = [x[0] for x in results_with_deal]
+    else:
+        results = query.order_by(Property.auction_date.desc().nullslast(), Property.id.desc()).limit(6).all()
+        results_with_deal = [(p, build_deal_intelligence(db, p.id)) for p in results]
+
+    title_heading = "Top Curated Auction Deals" if is_best_query else "Latest Residential Auctions"
     lines = [
-        f"### Latest Residential Auctions ({loc_desc})",
+        f"### {title_heading} ({loc_desc})",
         f"Found **{len(results)}** active residential auction lots:",
         "",
     ]
 
     action_links = []
     citations = []
-    if results:
-        for p in results:
+    if results_with_deal:
+        for p, deal in results_with_deal:
             rp_str = f"₹{p.reserve_price:,.0f}" if p.reserve_price else "Price pending"
             date_str = p.auction_date.strftime("%d %b %Y") if p.auction_date else "Date unannounced"
+            emd_str = f" | EMD: ₹{p.emd:,.0f}" if p.emd else ""
+
+            deal_str = ""
+            if deal and deal.deal_score is not None:
+                rating = deal.deal_rating or "Deal"
+                deal_str = f" — **{rating} (Score: {deal.deal_score:.0f}/100)**"
+                if deal.discount_percentage is not None and deal.discount_percentage > 0:
+                    deal_str += f" · {deal.discount_percentage:.1f}% discount"
+
             lines.append(
-                f"- **Lot #{p.id}**: {p.address} ({p.city or 'General'}) — **Reserve: {rp_str}** | Auction: `{date_str}`"
+                f"- **Lot #{p.id}**: {p.address} ({p.city or 'General'}){deal_str}\n"
+                f"  - Reserve: **{rp_str}**{emd_str} | Auction: `{date_str}`"
             )
             action_links.append({
                 "title": f"Open Lot #{p.id}",

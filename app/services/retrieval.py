@@ -193,7 +193,7 @@ def vector_search(
     if not query or not query.strip():
         return []
 
-    query_vec = embed_text(query)
+    query_vec = embed_text(query, task="query")
     q = (
         db.query(DocumentChunk, Document)
         .join(Document, Document.id == DocumentChunk.document_id)

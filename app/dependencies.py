@@ -10,6 +10,7 @@ Exports and manages lifecycle for:
 
 from __future__ import annotations
 
+import os
 from typing import Generator
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -23,7 +24,7 @@ from app.security import (
     get_current_user as _base_get_current_user,
     require_property_owner as _base_require_property_owner,
 )
-from app.services.llm import LLMProvider, LocalLLMProvider
+from app.services.llm import GeminiProvider, LLMProvider, LocalLLMProvider
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -93,8 +94,12 @@ def require_property_owner(
     )
 
 
-def get_llm_provider() -> LocalLLMProvider:
+def get_llm_provider() -> LLMProvider:
     """
-    Provide configured local LLM provider instance.
+    Provide configured LLM provider instance:
+    - GeminiProvider if GEMINI_API_KEY is configured (fast cloud inference)
+    - LocalLLMProvider otherwise (Ollama local inference)
     """
+    if os.getenv("GEMINI_API_KEY"):
+        return GeminiProvider()
     return LocalLLMProvider()
