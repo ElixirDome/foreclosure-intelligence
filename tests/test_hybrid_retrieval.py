@@ -10,8 +10,13 @@ Comprehensive unit and integration tests for Hybrid Retrieval (Section B):
 """
 
 from datetime import datetime, timezone
+import os
+import subprocess
+import sys
 from unittest.mock import patch
 import pytest
+from app.services import embeddings
+from app.services.embeddings import EMBEDDING_VERSION, embedding_model_id
 
 from app.models import Document, DocumentChunk
 from app.services.bm25 import BM25Ranker
@@ -26,6 +31,51 @@ from app.services.retrieval import (
     retrieve,
     vector_search,
 )
+
+
+class TestStableEmbeddings:
+    def test_embedding_is_stable_across_processes(self):
+        """Stored vectors must be reproducible across API and worker processes."""
+        snippet = (
+            "from app.services.embeddings import embed_text; "
+            "print(embed_text('PNB reserve price Pathankot 3438000'))"
+        )
+        outputs = []
+        for seed in ("1", "98765"):
+            env = dict(
+                os.environ,
+                PYTHONHASHSEED=seed,
+                OLLAMA_EMBEDDING_MODEL="",
+            )
+            outputs.append(
+                subprocess.check_output(
+                    [sys.executable, "-c", snippet],
+                    env=env,
+                    text=True,
+                ).strip()
+            )
+        assert outputs[0] == outputs[1]
+        assert EMBEDDING_VERSION == 3
+
+    def test_ollama_semantic_backend_is_used_when_configured(self, monkeypatch):
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"embeddings": [[3.0, 4.0]]}
+
+        monkeypatch.setattr(embeddings, "OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+        monkeypatch.setattr(embeddings, "_OLLAMA_UNAVAILABLE", False)
+        monkeypatch.setattr(
+            embeddings.requests,
+            "post",
+            lambda *args, **kwargs: FakeResponse(),
+        )
+
+        vector = embeddings.embed_text("auction reserve price")
+        assert vector == [0.6, 0.8]
+        assert embeddings.embedding_model_id() == "ollama:nomic-embed-text"
 
 
 class TestMultiQueryGeneration:

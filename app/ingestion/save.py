@@ -114,6 +114,11 @@ def _reconcile_property_from_source(property_obj: Property, property_data: dict)
     if property_data.get("raw_status"):
         property_obj.raw_status = property_data["raw_status"]
 
+    for field in ("property_unique_id", "auction_id", "property_images", "inspection_start", "inspection_end", "emd_deadline", "listing_url"):
+        value = property_data.get(field)
+        if value not in (None, [], ""):
+            setattr(property_obj, field, value)
+
     if property_data.get("extra_data"):
         existing_extra = dict(property_obj.extra_data or {})
         existing_extra.update(property_data["extra_data"])
@@ -191,6 +196,13 @@ def save_ingested_properties(
                 raw_status=property_data.get("raw_status"),
                 bank_name=property_data.get("bank_name"),
                 branch_name=property_data.get("branch_name"),
+                property_unique_id=property_data.get("property_unique_id"),
+                auction_id=property_data.get("auction_id"),
+                property_images=property_data.get("property_images"),
+                inspection_start=property_data.get("inspection_start"),
+                inspection_end=property_data.get("inspection_end"),
+                emd_deadline=property_data.get("emd_deadline"),
+                listing_url=property_data.get("listing_url"),
                 property_key=property_key,
                 extra_data=property_data.get("extra_data"),
             )

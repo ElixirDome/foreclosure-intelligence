@@ -79,7 +79,12 @@ def fake_llm_provider():
 
 @pytest.fixture
 def db():
+<<<<<<< HEAD
     Base.metadata.drop_all(bind=test_engine)
+=======
+    # Tests using the database directly (without the HTTP client fixture) still
+    # need the complete model schema in the isolated in-memory database.
+>>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
     Base.metadata.create_all(bind=test_engine)
     db = TestingSessionLocal()
     yield db

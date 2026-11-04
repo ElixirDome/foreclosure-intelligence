@@ -166,6 +166,14 @@ class Property(Base):
         nullable=True,
     )
 
+    property_unique_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    auction_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    property_images: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    inspection_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    inspection_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    emd_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    listing_url: Mapped[str | None] = mapped_column(String, nullable=True)
+
 
 class User(Base):
     __tablename__ = "users"

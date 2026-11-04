@@ -244,11 +244,28 @@ class PNBSourceAdapter(SourceAdapter):
         except Exception:
             return ""
 
+    @staticmethod
+    def _native_text_is_usable(text):
+        """Reject long but broken CID/font-map extraction before trusting it."""
+        if len(text.strip()) < 200:
+            return False
+        visible = [char for char in text if not char.isspace()]
+        if not visible:
+            return False
+        alpha = sum(char.isalpha() for char in visible)
+        cid_fragments = len(re.findall(r"\(cid:\d+\)", text, re.IGNORECASE))
+        return alpha / len(visible) >= 0.42 and text.count("\ufffd") < 5 and cid_fragments < 8
+
     def _get_text(self, pdf_path):
         native = self._extract_native_text(pdf_path)
-        if len(native) >= 200:
+        if self._native_text_is_usable(native):
             return native
-        return self._extract_ocr_text(pdf_path)
+        try:
+            ocr = self._extract_ocr_text(pdf_path)
+        except Exception as exc:
+            print(f"  OCR fallback failed: {exc}")
+            return native
+        return ocr if len(ocr.strip()) >= 100 else native
 
     def extract(self, item):
         title = item.get("title", "")

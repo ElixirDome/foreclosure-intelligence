@@ -64,6 +64,14 @@ class PropertyResponse(BaseModel):
     bank_name: str | None = None
     branch_name: str | None = None
     raw_status: str | None = None
+    property_unique_id: str | None = None
+    auction_id: str | None = None
+    property_images: list[str] | None = None
+    inspection_start: datetime | None = None
+    inspection_end: datetime | None = None
+    emd_deadline: datetime | None = None
+    listing_url: str | None = None
+    extra_data: dict[str, Any] | None = None
     estimated_value: float | None
     property_type: str | None
     survey_number: str | None = None

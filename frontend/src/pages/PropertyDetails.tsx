@@ -45,6 +45,8 @@ function deduplicateDocuments(items: DocumentItem[]): DocumentItem[] {
 interface Property {
   id: number;
   address: string;
+  city?: string | null;
+  locality?: string | null;
   price: number | null;
   bedrooms: number | null;
   bathrooms: number | null;
@@ -59,6 +61,13 @@ interface Property {
   survey_number: string | null;
   discount_percentage: number | null;
   deal_score: number | null;
+  bank_name?: string | null; branch_name?: string | null; possession_type?: string | null;
+  property_unique_id?: string | null; auction_id?: string | null; property_images?: string[] | null;
+  auction_start?: string | null; auction_end?: string | null; emd_deadline?: string | null;
+  inspection_start?: string | null; inspection_end?: string | null; listing_url?: string | null;
+  district?: string | null; state?: string | null; pincode?: string | null;
+  property_sub_type?: string | null; increment_amount?: number | null;
+  extra_data?: Record<string, unknown> | null;
 }
 interface PropertyAnalysis {
   estimated_value: number | null;
@@ -364,6 +373,7 @@ function PropertyDetails() {
           <Link to="/admin/import">Bank Sources</Link>
         </div>
 
+<<<<<<< HEAD
         <button
           type="button"
           onClick={toggleFavorite}
@@ -385,6 +395,40 @@ function PropertyDetails() {
           <span>{isFavorited ? "❤️ Saved to Favorites" : "🤍 Save to Favorites"}</span>
         </button>
       </div>
+=======
+        <h1>{property.address}</h1>
+        <p className="muted">{[property.locality, property.city, property.district, property.state, property.pincode].filter(Boolean).join(", ")}</p>
+        {property.property_images && property.property_images.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, margin: "18px 0" }}>
+            {property.property_images.map((src, index) => <a key={src} href={src} target="_blank" rel="noreferrer" style={{ display: "block", height: 180, overflow: "hidden", borderRadius: 10, background: "var(--bg-input)" }}><img src={src} alt={`Property view ${index + 1}`} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} /></a>)}
+          </div>
+        )}
+        <section className="analysis-subcard" style={{ margin: "18px 0" }}>
+          <h3>Official auction particulars</h3>
+          <div className="info-grid">
+            <div><strong>Bank</strong><span>{property.bank_name || "Not disclosed"}</span></div>
+            <div><strong>Branch</strong><span>{property.branch_name || "Not disclosed"}</span></div>
+            <div><strong>Property / auction ID</strong><span>{property.property_unique_id || property.auction_id || "Not provided"}</span></div>
+            <div><strong>Possession</strong><span>{property.possession_type || "Not specified"}</span></div>
+            <div><strong>Reserve price</strong><span>{formatINR(property.reserve_price)}</span></div>
+            <div><strong>EMD</strong><span>{formatINR(property.emd)}</span></div>
+            <div><strong>Increment</strong><span>{formatINR(property.increment_amount)}</span></div>
+            <div><strong>Auction starts</strong><span>{property.auction_start ? new Date(property.auction_start).toLocaleString("en-IN") : property.auction_date || "Not specified"}</span></div>
+            <div><strong>Auction ends</strong><span>{property.auction_end ? new Date(property.auction_end).toLocaleString("en-IN") : "Not specified"}</span></div>
+            <div><strong>EMD deadline</strong><span>{property.emd_deadline ? new Date(property.emd_deadline).toLocaleString("en-IN") : "Not specified"}</span></div>
+            <div><strong>Inspection window</strong><span>{property.inspection_start || property.inspection_end ? `${property.inspection_start ? new Date(property.inspection_start).toLocaleString("en-IN") : "—"} – ${property.inspection_end ? new Date(property.inspection_end).toLocaleString("en-IN") : "—"}` : "Not specified"}</span></div>
+            <div><strong>Property subtype</strong><span>{property.property_sub_type || "Not specified"}</span></div>
+            <div><strong>Listing title</strong><span>{String(property.extra_data?.propertyHeading ?? "Not provided")}</span></div>
+            <div><strong>Project</strong><span>{String(property.extra_data?.projectName ?? "Not specified")}</span></div>
+            <div><strong>Furnishing</strong><span>{String(property.extra_data?.furnishedStatus ?? "Not specified")}</span></div>
+            <div><strong>Carpet area</strong><span>{property.extra_data?.carpetAreaSqft != null ? `${String(property.extra_data.carpetAreaSqft)} sq ft` : "Not specified"}</span></div>
+            <div><strong>Built-up area</strong><span>{property.extra_data?.builtupAreaSqft != null ? `${String(property.extra_data.builtupAreaSqft)} sq ft` : "Not specified"}</span></div>
+            <div><strong>Type of action</strong><span>{String(property.extra_data?.typeOfAction ?? "Not specified")}</span></div>
+            <div><strong>Branch address</strong><span>{String(property.extra_data?.branchAddress ?? "Not provided")}</span></div>
+          </div>
+          {property.listing_url && <p><a href={property.listing_url} target="_blank" rel="noreferrer">Open original bank listing ↗</a></p>}
+        </section>
+>>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
 
       <div className="bn-detail-hero">
         <div className="bn-detail-meta-bar">
@@ -395,6 +439,7 @@ function PropertyDetails() {
             <span className="bn-pill bn-pill-type">
               🏡 {property.property_type ?? "Property"}
             </span>
+<<<<<<< HEAD
             {property.auction_date && (
               <span className="bn-pill bn-pill-auction-date">
                 📅 Auction: {property.auction_date}
@@ -432,6 +477,23 @@ function PropertyDetails() {
           <div className="bn-detail-kpi-item">
             <span>Survey / Khasra No</span>
             <strong>{property.survey_number ?? "Refer Title"}</strong>
+=======
+          </div>
+
+          <div>
+            <strong>Survey number</strong>
+            <span>{property.survey_number ?? "N/A"}</span>
+          </div>
+
+          <div>
+            <strong>Auction date</strong>
+            <span>{property.auction_date ?? "N/A"}</span>
+          </div>
+
+          <div>
+            <strong>City / locality</strong>
+            <span>{[property.locality, property.city].filter(Boolean).join(", ") || "N/A"}</span>
+>>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
           </div>
         </div>
       </div>
@@ -446,12 +508,21 @@ function PropertyDetails() {
         {!analysisLoading && analysis && (
           <div className="analysis-grid">
             <div className="analysis-card">
-              <strong>Estimated value</strong>
+              <strong>Estimated market value</strong>
               <span>
                 ₹
                 {analysis.estimated_value?.toLocaleString(
                   "en-IN"
                 ) ?? "N/A"}
+              </span>
+            </div>
+
+            <div className="analysis-card">
+              <strong>Valuation confidence</strong>
+              <span>
+                {analysis.valuation_confidence != null
+                  ? `${(analysis.valuation_confidence * 100).toFixed(0)}%`
+                  : "N/A"}
               </span>
             </div>
 
@@ -507,14 +578,6 @@ function PropertyDetails() {
         <div className="deal-intel-signals">
           <h4>Additional signals</h4>
           <div className="analysis-grid">
-            <div className="analysis-card">
-              <strong>Deal score</strong>
-              <span>{dealIntel.deal_score ?? "N/A"}</span>
-            </div>
-            <div className="analysis-card">
-              <strong>Rating</strong>
-              <span>{dealIntel.deal_rating ?? "N/A"}</span>
-            </div>
             <div className="analysis-card">
               <strong>Comparables</strong>
               <span>{dealIntel.comparable_count}</span>

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.models import Document, DocumentChunk, Evidence
+from app.services.embeddings import EMBEDDING_VERSION, embedding_model_id
 
 
 def compute_content_hash(content: bytes | str) -> str:
@@ -318,6 +319,8 @@ def replace_document_chunks(
     for item in chunks:
         meta = dict(item.get("metadata_json") or {})
         meta["embedding"] = embed_text(item["text"])
+        meta["embedding_version"] = EMBEDDING_VERSION
+        meta["embedding_model"] = embedding_model_id()
         chunk = DocumentChunk(
             document_id=document.id,
             chunk_index=item["chunk_index"],
