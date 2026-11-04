@@ -1,5 +1,5 @@
 {
-  "evaluation_timestamp": "2026-11-03T04:03:21.005591+00:00",
+  "evaluation_timestamp": "2026-11-04T08:51:47.054811+00:00",
   "total_benchmark_samples": 12,
   "metrics": {
     "rag_triad": {
@@ -18,10 +18,10 @@
       "negative_refusal_accuracy": 1.0
     },
     "latency_sla": {
-      "mean_latency_ms": 4.84,
-      "p50_latency_ms": 4.0,
-      "p95_latency_ms": 11.49,
-      "p99_latency_ms": 12.58
+      "mean_latency_ms": 6.22,
+      "p50_latency_ms": 4.57,
+      "p95_latency_ms": 17.04,
+      "p99_latency_ms": 18.09
     }
   },
   "per_sample_results": [
@@ -35,7 +35,7 @@
       "mrr_at_5": 0.5,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 10.38
+      "latency_ms": 9.81
     },
     {
       "sample_id": "eval_val_02",
@@ -47,7 +47,7 @@
       "mrr_at_5": 1.0,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 4.72
+      "latency_ms": 4.57
     },
     {
       "sample_id": "eval_fin_01",
@@ -59,7 +59,7 @@
       "mrr_at_5": 1.0,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 12.85
+      "latency_ms": 18.35
     },
     {
       "sample_id": "eval_fin_02",
@@ -71,7 +71,7 @@
       "mrr_at_5": 1.0,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 3.15
+      "latency_ms": 3.26
     },
     {
       "sample_id": "eval_rep_01",
@@ -83,7 +83,7 @@
       "mrr_at_5": 1.0,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 9.43
+      "latency_ms": 15.97
     },
     {
       "sample_id": "eval_rep_02",
@@ -95,7 +95,7 @@
       "mrr_at_5": 1.0,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 3.59
+      "latency_ms": 5.14
     },
     {
       "sample_id": "eval_doc_01",
@@ -107,7 +107,7 @@
       "mrr_at_5": 0.5,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 2.27
+      "latency_ms": 2.58
     },
     {
       "sample_id": "eval_disc_01",
@@ -119,7 +119,7 @@
       "mrr_at_5": 1.0,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 4.42
+      "latency_ms": 8.38
     },
     {
       "sample_id": "eval_onb_01",
@@ -131,7 +131,7 @@
       "mrr_at_5": 1.0,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 1.17
+      "latency_ms": 0.87
     },
     {
       "sample_id": "eval_neg_01",
@@ -143,7 +143,7 @@
       "mrr_at_5": 1.0,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 4.63
+      "latency_ms": 4.57
     },
     {
       "sample_id": "eval_neg_02",
@@ -155,7 +155,7 @@
       "mrr_at_5": 1.0,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 0.88
+      "latency_ms": 0.63
     },
     {
       "sample_id": "eval_neg_03",
@@ -167,7 +167,7 @@
       "mrr_at_5": 1.0,
       "hallucination_rate": 0.0,
       "negative_refusal_correct": true,
-      "latency_ms": 0.56
+      "latency_ms": 0.48
     }
   ]
 }

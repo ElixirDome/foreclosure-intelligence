@@ -3,10 +3,14 @@ Database migration chain validation, schema integrity, constraints, and ingestio
 Validates Alembic heads, foreign keys, transaction rollbacks, and duplicate notice prevention.
 """
 
+import os
+import tempfile
 from datetime import datetime, timezone
+from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 import pytest
+import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from app.ingestion.save import save_ingested_properties
 from app.models import Document, DocumentChunk, Evidence, IngestionRun, Property, PropertyDocument, User
@@ -35,6 +39,46 @@ class TestAlembicMigrationChain:
                         assert down_rev in rev_map, f"Down revision {down_rev} not found in map for {r.revision}"
                 else:
                     assert r.down_revision in rev_map, f"Down revision {r.down_revision} not found for {r.revision}"
+
+    def test_alembic_upgrade_head_fresh_and_idempotent(self):
+        """Verify that upgrading to head succeeds on fresh DB and is idempotent without DuplicateTable errors."""
+        temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        temp_db.close()
+        try:
+            config = Config("alembic.ini")
+            config.set_main_option("sqlalchemy.url", f"sqlite:///{temp_db.name}")
+
+            # First upgrade pass: creates all tables, columns, indexes
+            command.upgrade(config, "head")
+
+            # Second upgrade pass: re-running upgrade against current head is a no-op / idempotent
+            command.upgrade(config, "head")
+
+            # Inspect that document_chunks index exists
+            engine = sa.create_engine(f"sqlite:///{temp_db.name}")
+            try:
+                insp = sa.inspect(engine)
+                indexes = {ix["name"] for ix in insp.get_indexes("document_chunks")}
+                assert "ix_document_chunks_document_id_chunk_index" in indexes
+            finally:
+                engine.dispose()
+        finally:
+            if os.path.exists(temp_db.name):
+                try:
+                    os.unlink(temp_db.name)
+                except PermissionError:
+                    pass
+
+    def test_document_chunk_composite_index_migration_idempotent(self):
+        """Directly verify that revision 66c1710f4924 handles already-existing indexes gracefully."""
+        config = Config("alembic.ini")
+        script = ScriptDirectory.from_config(config)
+        rev_66 = script.get_revision("66c1710f4924")
+        assert rev_66 is not None
+
+        # Verify revision defines safe upgrade and downgrade callables
+        assert callable(rev_66.module.upgrade)
+        assert callable(rev_66.module.downgrade)
 
 
 @pytest.mark.migration

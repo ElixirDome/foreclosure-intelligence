@@ -1,21 +1,3 @@
-<<<<<<< HEAD
-import React, { createContext, useContext, useState, useCallback } from "react";
-
-interface AnalystContextType {
-  isOpen: boolean;
-  activePropertyId: number | null;
-  activePropertyAddress: string | null;
-  openAnalyst: (propertyId?: number | null, address?: string | null, initialPrompt?: string) => void;
-  closeAnalyst: () => void;
-  clearPropertyScope: () => void;
-  pendingPrompt: string | null;
-  consumePendingPrompt: () => string | null;
-}
-
-const AnalystContext = createContext<AnalystContextType | undefined>(undefined);
-
-export function AnalystProvider({ children }: { children: React.ReactNode }) {
-=======
 import {
   createContext,
   useCallback,
@@ -29,9 +11,10 @@ interface AnalystContextValue {
   isOpen: boolean;
   activePropertyId: number | null;
   activePropertyAddress: string | null;
+  pendingPrompt?: string | null;
   openAnalyst: (
-    propertyId?: number,
-    propertyAddress?: string,
+    propertyId?: number | null,
+    propertyAddress?: string | null,
     pendingPrompt?: string,
   ) => void;
   closeAnalyst: () => void;
@@ -42,44 +25,28 @@ interface AnalystContextValue {
 const AnalystContext = createContext<AnalystContextValue | null>(null);
 
 export function AnalystProvider({ children }: { children: ReactNode }) {
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
   const [isOpen, setIsOpen] = useState(false);
   const [activePropertyId, setActivePropertyId] = useState<number | null>(null);
   const [activePropertyAddress, setActivePropertyAddress] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
   const openAnalyst = useCallback(
-<<<<<<< HEAD
-    (propertyId?: number | null, address?: string | null, initialPrompt?: string) => {
-      if (propertyId != null) {
+    (propertyId?: number | null, propertyAddress?: string | null, prompt?: string) => {
+      if (propertyId !== undefined && propertyId !== null) {
         setActivePropertyId(propertyId);
-        setActivePropertyAddress(address || `Lot #${propertyId}`);
-      }
-      if (initialPrompt) {
-        setPendingPrompt(initialPrompt);
-      }
-      setIsOpen(true);
-    },
-    []
-  );
-
-  const closeAnalyst = useCallback(() => {
-    setIsOpen(false);
-  }, []);
-=======
-    (propertyId?: number, propertyAddress?: string, prompt?: string) => {
-      if (propertyId !== undefined) {
-        setActivePropertyId(propertyId);
+        setActivePropertyAddress(propertyAddress || `Lot #${propertyId}`);
+      } else if (propertyAddress !== undefined) {
         setActivePropertyAddress(propertyAddress ?? null);
       }
-      setPendingPrompt(prompt ?? null);
+      if (prompt !== undefined) {
+        setPendingPrompt(prompt ?? null);
+      }
       setIsOpen(true);
     },
     [],
   );
 
   const closeAnalyst = useCallback(() => setIsOpen(false), []);
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
 
   const clearPropertyScope = useCallback(() => {
     setActivePropertyId(null);
@@ -87,37 +54,6 @@ export function AnalystProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const consumePendingPrompt = useCallback(() => {
-<<<<<<< HEAD
-    const p = pendingPrompt;
-    setPendingPrompt(null);
-    return p;
-  }, [pendingPrompt]);
-
-  return (
-    <AnalystContext.Provider
-      value={{
-        isOpen,
-        activePropertyId,
-        activePropertyAddress,
-        openAnalyst,
-        closeAnalyst,
-        clearPropertyScope,
-        pendingPrompt,
-        consumePendingPrompt,
-      }}
-    >
-      {children}
-    </AnalystContext.Provider>
-  );
-}
-
-export function useAnalyst() {
-  const ctx = useContext(AnalystContext);
-  if (!ctx) {
-    throw new Error("useAnalyst must be used within an AnalystProvider");
-  }
-  return ctx;
-=======
     const prompt = pendingPrompt;
     setPendingPrompt(null);
     return prompt;
@@ -128,6 +64,7 @@ export function useAnalyst() {
       isOpen,
       activePropertyId,
       activePropertyAddress,
+      pendingPrompt,
       openAnalyst,
       closeAnalyst,
       clearPropertyScope,
@@ -137,6 +74,7 @@ export function useAnalyst() {
       isOpen,
       activePropertyId,
       activePropertyAddress,
+      pendingPrompt,
       openAnalyst,
       closeAnalyst,
       clearPropertyScope,
@@ -153,5 +91,4 @@ export function useAnalyst(): AnalystContextValue {
     throw new Error("useAnalyst must be used within an AnalystProvider");
   }
   return context;
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
 }

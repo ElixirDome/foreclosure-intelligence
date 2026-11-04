@@ -11,16 +11,19 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "market_comparables",
-        sa.Column(
-            "comparable_key",
-            sa.String(),
-            nullable=True,
-        ),
-    )
-
     connection = op.get_bind()
+    insp = sa.inspect(connection)
+    cols = {c["name"] for c in insp.get_columns("market_comparables")}
+
+    if "comparable_key" not in cols:
+        op.add_column(
+            "market_comparables",
+            sa.Column(
+                "comparable_key",
+                sa.String(),
+                nullable=True,
+            ),
+        )
 
     connection.execute(
         sa.text(
@@ -31,37 +34,46 @@ def upgrade() -> None:
                 || '|'
                 || LOWER(TRIM(address))
                 || '|'
-                || area_sqft::text
+                || CAST(area_sqft AS TEXT)
                 || '|'
-                || sale_price::text
+                || CAST(sale_price AS TEXT)
                 || '|'
-                || COALESCE(sale_date::text, '')
+                || COALESCE(CAST(sale_date AS TEXT), '')
             WHERE comparable_key IS NULL
             """
         )
     )
 
-    op.alter_column(
-        "market_comparables",
-        "comparable_key",
-        nullable=False,
-    )
+    if connection.dialect.name != "sqlite":
+        op.alter_column(
+            "market_comparables",
+            "comparable_key",
+            nullable=False,
+        )
 
-    op.create_index(
-        "ix_market_comparables_comparable_key",
-        "market_comparables",
-        ["comparable_key"],
-        unique=True,
-    )
+    indexes = {ix["name"] for ix in insp.get_indexes("market_comparables")}
+    if "ix_market_comparables_comparable_key" not in indexes:
+        op.create_index(
+            "ix_market_comparables_comparable_key",
+            "market_comparables",
+            ["comparable_key"],
+            unique=True,
+        )
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_market_comparables_comparable_key",
-        table_name="market_comparables",
-    )
+    connection = op.get_bind()
+    insp = sa.inspect(connection)
+    indexes = {ix["name"] for ix in insp.get_indexes("market_comparables")}
+    if "ix_market_comparables_comparable_key" in indexes:
+        op.drop_index(
+            "ix_market_comparables_comparable_key",
+            table_name="market_comparables",
+        )
 
-    op.drop_column(
-        "market_comparables",
-        "comparable_key",
-    )
+    cols = {c["name"] for c in insp.get_columns("market_comparables")}
+    if "comparable_key" in cols:
+        op.drop_column(
+            "market_comparables",
+            "comparable_key",
+        )

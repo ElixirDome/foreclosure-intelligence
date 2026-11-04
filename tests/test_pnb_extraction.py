@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -7,22 +6,15 @@ from app.services.pnb_extraction import (
     _parse_area_sqft,
     _parse_date,
     _parse_emd,
+    _parse_opening_bid,
     _parse_price,
     _parse_survey_number,
     extract_location,
     extract_pnb_properties,
+    extract_pnb_property,
 )
 from app.models import Document, Evidence, IngestionRun, Property, PropertyDocument, User
 from app.ingestion.save import save_ingested_properties
-=======
-from app.services.pnb_extraction import (
-    _parse_area_sqft,
-    _parse_emd,
-    _parse_opening_bid,
-    extract_pnb_property,
-    extract_pnb_properties,
-)
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
 
 
 def test_pnb_area_parser_ignores_punctuation_without_digits():
@@ -37,7 +29,6 @@ def test_pnb_area_parser_still_converts_valid_measurements():
     assert _parse_area_sqft("Area: 100 Sq Yards") == 900
 
 
-<<<<<<< HEAD
 def test_pnb_area_parser_converts_kanal_and_marla():
     # 1 Kanal = 20 Marla = 5,445 sq ft; 1 Marla = 272.25 sq ft
     # 5 Kanal 17 Marla = (5*20 + 17) * 272.25 = 117 * 272.25 = 31,853 sq ft
@@ -105,7 +96,7 @@ def test_armb_pathankot_notice_extraction():
     assert "Tugalwal" in lot1["address"]
     assert lot1["city"] == "Gurdaspur"
     assert lot1["reserve_price"] == 3552000.0
-    assert lot1["opening_bid"] == 3552000.0
+    assert lot1["opening_bid"] is None
     assert lot1["emd"] == 355200.0
     assert lot1["auction_date"] == date(2026, 10, 27)
     assert lot1["area_sqft"] == 31853
@@ -238,7 +229,6 @@ def test_armb_property_visible_via_api(client, db):
     addresses = [item["address"] for item in data["items"]]
     assert any("Tugalwal" in addr for addr in addresses)
 
-=======
 
 def test_pnb_reserve_price_is_not_misreported_as_opening_bid():
     extracted = extract_pnb_property(
@@ -275,4 +265,3 @@ def test_pnb_extraction_repairs_ocr_typos_and_recognizes_residential_plot():
     assert len(properties) == 1
     assert properties[0]["address"]
     assert properties[0]["reserve_price"] == 4500000.0
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a

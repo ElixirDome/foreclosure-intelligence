@@ -110,37 +110,18 @@ def _parse_price(text: str):
         has_lakh = bool(re.search(r"\b(?:lakh|lac)\b", match.group(0), re.IGNORECASE))
         return _clean_amount(match.group(1), has_lakh)
 
-<<<<<<< HEAD
     # 2. Table formatted: "A)\s*Rs\s*(\d[\d,]*(?:\.\d+)?)"
-=======
-    value = float(match.group(1).replace(",", ""))
-
-    if re.search(
-        r"\b(?:lakh|lac)\b",
-        match.group(0),
-        re.IGNORECASE,
-    ):
-        value *= 100000
-
-    return value
-
-
-def _parse_emd(text: str):
-    """Extract EMD only when the notice explicitly labels the amount."""
     match = re.search(
-        r"(?:Earnest\s+Money\s+Deposit|EMD(?:\s+Amount)?)"
-        r"\s*[:\-]?\s*(?:Rs\.?|₹)?\s*"
-        r"([\d,]+(?:\.\d+)?)\s*(?:lakh|lac)?",
+        r"A\)\s*(?:Rs\.?|₹)\s*(\d[\d,]*(?:\.\d+)?)\s*(?:lakh|lac)?\s*/?-?",
         text,
         re.IGNORECASE,
     )
-    if not match:
-        return None
 
-    value = float(match.group(1).replace(",", ""))
-    if re.search(r"\b(?:lakh|lac)\b", match.group(0), re.IGNORECASE):
-        value *= 100000
-    return value
+    if match:
+        has_lakh = bool(re.search(r"\b(?:lakh|lac)\b", match.group(0), re.IGNORECASE))
+        return _clean_amount(match.group(1), has_lakh)
+
+    return None
 
 
 def _parse_opening_bid(text: str):
@@ -159,21 +140,6 @@ def _parse_opening_bid(text: str):
     if re.search(r"\b(?:lakh|lac)\b", match.group(0), re.IGNORECASE):
         value *= 100000
     return value
-
-
-def _parse_survey_number(text: str):
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
-    match = re.search(
-        r"A\)\s*(?:Rs\.?|₹)\s*(\d[\d,]*(?:\.\d+)?)\s*(?:lakh|lac)?\s*/?-?",
-        text,
-        re.IGNORECASE,
-    )
-
-    if match:
-        has_lakh = bool(re.search(r"\b(?:lakh|lac)\b", match.group(0), re.IGNORECASE))
-        return _clean_amount(match.group(1), has_lakh)
-
-    return None
 
 
 def _parse_emd(text: str, reserve_price: float | None = None):
@@ -209,7 +175,6 @@ def _parse_emd(text: str, reserve_price: float | None = None):
 
 def _parse_survey_number(text: str):
     match = re.search(
-<<<<<<< HEAD
         r"(?:Khasra\s*No\.?|Khasra\s*Number|"
         r"Survey\s*No\.?|Sy\.\s*No\.?|Survey\s*Number|"
         r"Khewat\s*No\.?|Khatauni\s*No\.?)"
@@ -217,15 +182,6 @@ def _parse_survey_number(text: str):
         text,
         re.IGNORECASE,
     )
-=======
-    r"Residential\s+(?:Property|House|Flat|Plot|Land)"
-    r"\s+(?:situated|located|standing)"
-    r"\s+(?:at|on)\s+(.+?)"
-    r"(?:\bMeasuring\b|\bBounded\b|\bReserve Price\b|\bEMD\b|\n\s*\d+\s*[.)])",
-    text,
-    re.IGNORECASE | re.DOTALL,
-)
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
 
     if match:
         return match.group(1).rstrip(".,;")
@@ -254,7 +210,6 @@ def _clean_text(t: str) -> str:
 def _extract_address(text: str):
     # Pattern 1: Flat / Apartment notices
     match = re.search(
-<<<<<<< HEAD
         r"(?:All\s+(?:that\s+)?part\s*(?:&|and)\s*parcel\s+of\s+(?:the\s+)?)?"
         r"((?:Flat|Apartment)\s+No\.?.+?)"
         r"(?=\b(?:Total\s+Area|measuring|Bounded|Reserve\s*Price|EMD|in\s+the\s+name\s+of|\(?\s*Symbolic|\(?\s*Physical)\b|\n\s*\n)",
@@ -282,19 +237,13 @@ def _extract_address(text: str):
 
     # Pattern 3: Residential Property situated at Plot No. 198...
     match = re.search(
-        r"Residential\s+(?:Property|House)"
+        r"Residential\s+(?:Property|House|Flat|Plot|Land)"
         r"\s+(?:situated|located|standing)"
         r"\s+(?:at|on)\s+(.+?)"
         r"(?:\bMeasuring\b|\bBounded\b|\bReserve\s*Price\b|\bEMD\b|\n\s*\d+\s*[.)])",
-=======
-        r"(?:All\s+part\s*(?:&|and)\s*parcel\s+of\s+)"
-        r"(Residential\s+(?:House|Property|Flat|Plot|Land).+?)"
-        r"(?=\bmeasuring\b)",
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
         text,
         re.IGNORECASE | re.DOTALL,
     )
-
     if match:
         return _clean_text(match.group(1))
 
@@ -306,7 +255,6 @@ def _extract_address(text: str):
         text,
         re.IGNORECASE | re.DOTALL,
     )
-
     if match:
         return _clean_text(match.group(1))
 
@@ -318,34 +266,10 @@ def _extract_address(text: str):
         text,
         re.IGNORECASE | re.DOTALL,
     )
-
     if match:
         return _clean_text(match.group(1))
 
     return None
-
-
-<<<<<<< HEAD
-=======
-def extract_pnb_property(text: str) -> dict:
-    """
-    Extract one residential property from a PNB section.
-    """
-
-    reserve_price = _parse_price(text)
-    return {
-        "address": _extract_address(text),
-        "area_sqft": _parse_area_sqft(text),
-        "opening_bid": _parse_opening_bid(text),
-        "reserve_price": reserve_price,
-        "emd": _parse_emd(text),
-        "auction_date": _parse_date(text),
-        "property_type": "Residential Property",
-        "survey_number": _parse_survey_number(text),
-    }
-
-
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
 def extract_location(address: str) -> tuple[str | None, str | None]:
     """
     Extract a best-effort city and locality from an Indian property address.
@@ -461,7 +385,7 @@ def extract_pnb_property(text: str) -> dict:
     return {
         "address": _extract_address(text),
         "area_sqft": _parse_area_sqft(text),
-        "opening_bid": reserve_price,
+        "opening_bid": _parse_opening_bid(text),
         "reserve_price": reserve_price,
         "emd": emd,
         "auction_date": _parse_date(text),
@@ -497,14 +421,10 @@ def extract_pnb_properties(text: str) -> list[dict]:
 
     matches = list(
         re.finditer(
-<<<<<<< HEAD
-            r"(?:\bResidential\s+(?:Property|House|Flat|Apartment|Building)\b"
+            r"(?:\bResidential\s+(?:Property|House|Flat|Apartment|Building|Plot|Land)\b"
             r"|\b(?:Flat|Apartment)\s+No\.?\b"
             r"|\bEM\s+of\s+(?:Land\s+and\s+)?Residential\b"
             r"|\bAll\s+(?:that\s+)?part\s*(?:&|and)\s*parcel\s+of\s+(?:the\s+)?(?:Flat|Residential))",
-=======
-            r"\bResidential\s+(?:Property|House|Flat|Plot|Land)\b",
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
             text,
             re.IGNORECASE,
         )

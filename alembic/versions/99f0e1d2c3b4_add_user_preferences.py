@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    inspector = Inspector.from_engine(bind)
+    inspector = sa.inspect(bind)
     tables = inspector.get_table_names()
 
     if 'user_preferences' not in tables:
@@ -48,5 +48,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index('ix_user_preferences_user_id', table_name='user_preferences')
-    op.drop_table('user_preferences')
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if 'user_preferences' in insp.get_table_names():
+        indexes = {ix['name'] for ix in insp.get_indexes('user_preferences')}
+        if 'ix_user_preferences_user_id' in indexes:
+            op.drop_index('ix_user_preferences_user_id', table_name='user_preferences')
+        op.drop_table('user_preferences')

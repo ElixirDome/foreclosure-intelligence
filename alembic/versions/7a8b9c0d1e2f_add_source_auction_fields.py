@@ -1,7 +1,7 @@
 """add source auction fields
 
 Revision ID: 7a8b9c0d1e2f
-Revises: 99f0e1d2c3b4
+Revises: f1a2b3c4d5e6
 Create Date: 2026-10-28 17:45:00.000000
 
 """
@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    inspector = Inspector.from_engine(bind)
+    inspector = sa.inspect(bind)
     cols = {c['name'] for c in inspector.get_columns('properties')}
 
     new_columns = [
@@ -45,6 +45,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    cols = {c['name'] for c in inspector.get_columns('properties')}
+
     columns_to_drop = [
         'extra_data',
         'raw_status',
@@ -60,4 +64,5 @@ def downgrade() -> None:
         'increment_amount',
     ]
     for col in columns_to_drop:
-        op.drop_column('properties', col)
+        if col in cols:
+            op.drop_column('properties', col)

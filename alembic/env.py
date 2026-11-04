@@ -15,7 +15,10 @@ load_dotenv()
 # access to the values within the .ini file in use.
 config = context.config
 
-database_url = os.getenv("DATABASE_URL")
+database_url = (
+    config.get_main_option("sqlalchemy.url")
+    or os.getenv("DATABASE_URL")
+)
 
 if not database_url:
     raise RuntimeError("DATABASE_URL is not configured")
@@ -70,14 +73,17 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    db_url = config.attributes.get("database_url") or config.get_main_option("sqlalchemy.url") or os.getenv("DATABASE_URL")
     connectable = create_engine(
-    config.attributes["database_url"],
-    poolclass=pool.NullPool,
-)
+        db_url,
+        poolclass=pool.NullPool,
+    )
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=True,
         )
 
         with context.begin_transaction():

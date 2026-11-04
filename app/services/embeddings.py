@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-<<<<<<< HEAD
-=======
 import logging
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
 import math
 import os
 import re
@@ -53,21 +50,12 @@ def _hashed_embedding(text: str, dim: int = VECTOR_DIM) -> list[float]:
     counts = Counter(tokens)
     vector = [0.0] * dim
     for token, count in counts.items():
-<<<<<<< HEAD
-        # Deterministic hash into bucket; sign bit reduces collisions.
-        h = _stable_token_hash(token)
-        idx = abs(h) % dim
-        sign = 1.0 if (h & 1) == 0 else -1.0
-        # Simple TF weighting
-        vec[idx] += sign * (1.0 + math.log(count))
-=======
         # Stable hashing is essential: Python's built-in hash changes by process.
         digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
         hashed = int.from_bytes(digest, byteorder="big", signed=False)
         index = hashed % dim
         sign = 1.0 if (hashed & 1) == 0 else -1.0
         vector[index] += sign * (1.0 + math.log(count))
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
 
     norm = math.sqrt(sum(value * value for value in vector))
     if norm == 0:

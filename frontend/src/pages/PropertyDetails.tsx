@@ -373,7 +373,6 @@ function PropertyDetails() {
           <Link to="/admin/import">Bank Sources</Link>
         </div>
 
-<<<<<<< HEAD
         <button
           type="button"
           onClick={toggleFavorite}
@@ -395,14 +394,63 @@ function PropertyDetails() {
           <span>{isFavorited ? "❤️ Saved to Favorites" : "🤍 Save to Favorites"}</span>
         </button>
       </div>
-=======
-        <h1>{property.address}</h1>
+
+      <div className="bn-detail-hero">
+        <div className="bn-detail-meta-bar">
+          <span className="bn-bank-badge">
+            🏦 BAANKNET LOT #{property.id}
+          </span>
+          <div className="bn-ribbon-badges">
+            <span className="bn-pill bn-pill-type">
+              🏡 {property.property_type ?? "Property"}
+            </span>
+            {property.auction_date && (
+              <span className="bn-pill bn-pill-auction-date">
+                📅 Auction: {property.auction_date}
+              </span>
+            )}
+            <span className="bn-pill bn-pill-possession">
+              🛡️ {property.foreclosure_status === "scheduled" ? "SARFAESI Scheduled" : (property.foreclosure_status ?? "Active")}
+            </span>
+            {analysis?.deal_score != null && (
+              <span className="bn-pill" style={{ background: "#f5f3ff", color: "#6d28d9", border: "1px solid #ddd6fe" }}>
+                ⭐ Deal score: {analysis.deal_score}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <h1 className="bn-detail-title">{property.address}</h1>
         <p className="muted">{[property.locality, property.city, property.district, property.state, property.pincode].filter(Boolean).join(", ")}</p>
+
         {property.property_images && property.property_images.length > 0 && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, margin: "18px 0" }}>
             {property.property_images.map((src, index) => <a key={src} href={src} target="_blank" rel="noreferrer" style={{ display: "block", height: 180, overflow: "hidden", borderRadius: 10, background: "var(--bg-input)" }}><img src={src} alt={`Property view ${index + 1}`} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} /></a>)}
           </div>
         )}
+
+        <div className="bn-detail-kpi-ribbon">
+          <div className="bn-detail-kpi-item">
+            <span>Reserve Price</span>
+            <strong style={{ color: "#0b1f3a" }}>{formatINR(property.reserve_price)}</strong>
+          </div>
+
+          <div className="bn-detail-kpi-item">
+            <span>EMD (10%)</span>
+            <strong style={{ color: "#1d4ed8" }}>{formatINR(property.emd)}</strong>
+          </div>
+
+          <div className="bn-detail-kpi-item">
+            <span>Super Built-up / Land Area</span>
+            <strong>{property.area_sqft ? `${property.area_sqft.toLocaleString()} sq ft` : "As per notice"}</strong>
+          </div>
+
+          <div className="bn-detail-kpi-item">
+            <span>Survey / Khasra No</span>
+            <strong>{property.survey_number ?? "Refer Title"}</strong>
+          </div>
+        </div>
+
         <section className="analysis-subcard" style={{ margin: "18px 0" }}>
           <h3>Official auction particulars</h3>
           <div className="info-grid">
@@ -428,74 +476,6 @@ function PropertyDetails() {
           </div>
           {property.listing_url && <p><a href={property.listing_url} target="_blank" rel="noreferrer">Open original bank listing ↗</a></p>}
         </section>
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
-
-      <div className="bn-detail-hero">
-        <div className="bn-detail-meta-bar">
-          <span className="bn-bank-badge">
-            🏦 BAANKNET LOT #{property.id}
-          </span>
-          <div className="bn-ribbon-badges">
-            <span className="bn-pill bn-pill-type">
-              🏡 {property.property_type ?? "Property"}
-            </span>
-<<<<<<< HEAD
-            {property.auction_date && (
-              <span className="bn-pill bn-pill-auction-date">
-                📅 Auction: {property.auction_date}
-              </span>
-            )}
-            <span className="bn-pill bn-pill-possession">
-              🛡️ {property.foreclosure_status === "scheduled" ? "SARFAESI Scheduled" : (property.foreclosure_status ?? "Active")}
-            </span>
-            {analysis?.deal_score != null && (
-              <span className="bn-pill" style={{ background: "#f5f3ff", color: "#6d28d9", border: "1px solid #ddd6fe" }}>
-                ⭐ Deal score: {analysis.deal_score}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <h1 className="bn-detail-title">{property.address}</h1>
-
-        <div className="bn-detail-kpi-ribbon">
-          <div className="bn-detail-kpi-item">
-            <span>Reserve Price</span>
-            <strong style={{ color: "#0b1f3a" }}>{formatINR(property.reserve_price)}</strong>
-          </div>
-
-          <div className="bn-detail-kpi-item">
-            <span>EMD (10%)</span>
-            <strong style={{ color: "#1d4ed8" }}>{formatINR(property.emd)}</strong>
-          </div>
-
-          <div className="bn-detail-kpi-item">
-            <span>Super Built-up / Land Area</span>
-            <strong>{property.area_sqft ? `${property.area_sqft.toLocaleString()} sq ft` : "As per notice"}</strong>
-          </div>
-
-          <div className="bn-detail-kpi-item">
-            <span>Survey / Khasra No</span>
-            <strong>{property.survey_number ?? "Refer Title"}</strong>
-=======
-          </div>
-
-          <div>
-            <strong>Survey number</strong>
-            <span>{property.survey_number ?? "N/A"}</span>
-          </div>
-
-          <div>
-            <strong>Auction date</strong>
-            <span>{property.auction_date ?? "N/A"}</span>
-          </div>
-
-          <div>
-            <strong>City / locality</strong>
-            <span>{[property.locality, property.city].filter(Boolean).join(", ") || "N/A"}</span>
->>>>>>> 92c77001379e6b91b43212cb314e441bf427457a
-          </div>
-        </div>
       </div>
 
       <div className="deal-analysis-unified analysis-container">
