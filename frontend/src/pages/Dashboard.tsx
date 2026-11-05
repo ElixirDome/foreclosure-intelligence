@@ -918,14 +918,14 @@ function Dashboard() {
               return (
                 <article key={property.id} style={{ overflow: "hidden", border: "1px solid var(--border-subtle)", borderRadius: 14, background: "var(--bg-card)", color: "var(--text-primary)", display: "flex", flexDirection: "column", minWidth: 0 }}>
                   <div style={{ position: "relative", height: 220, background: "var(--bg-input)" }}>
-                    {image ? <img src={image} alt={property.address} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", color: "var(--text-muted)", gap: 6 }}><span style={{ fontSize: 42 }}>🏠</span><span>Property image not provided by source</span></div>}
+                    {image ? <img src={image} alt={property.address} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", color: "var(--text-muted)", gap: 6 }}><span>Property image not provided by source</span></div>}
                     <span style={{ position: "absolute", top: 12, left: 12, background: "rgba(15,23,42,.88)", color: "#fff", padding: "5px 10px", borderRadius: 6, fontSize: 12, fontWeight: 700 }}>{property.foreclosure_status || "Status unavailable"}</span>
                     <button type="button" onClick={(event) => toggleFavorite(property.id, event)} aria-label={isFavorited ? "Remove saved property" : "Save property"} style={{ position: "absolute", top: 10, right: 10, border: 0, borderRadius: "50%", width: 38, height: 38, background: "rgba(15,23,42,.88)", color: "#fff", cursor: "pointer", fontSize: 18 }}>{isFavorited ? "♥" : "♡"}</button>
                     {isNewlyAdded && <span style={{ position: "absolute", bottom: 10, left: 12, background: "#166534", color: "#fff", padding: "4px 8px", borderRadius: 5, fontSize: 11 }}>JUST ADDED</span>}
                   </div>
                   <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
-                    <div><div style={{ fontSize: 12, color: "var(--accent-primary, #38bdf8)", fontWeight: 700 }}>{bankName}{property.branch_name ? ` · ${property.branch_name}` : ""}</div><h3 style={{ fontSize: 17, lineHeight: 1.35, margin: "5px 0" }}>{property.address}</h3></div>
-                    <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>📍 {locationText || "Location details not provided"}</div>
+                    <div><div style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 700 }}>{bankName}{property.branch_name ? ` · ${property.branch_name}` : ""}</div><h3 style={{ fontSize: 17, lineHeight: 1.35, margin: "5px 0" }}>{property.address}</h3></div>
+                    <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>{locationText || "Location details not provided"}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: 12, borderRadius: 9, background: "var(--bg-input)" }}>
                       <div><div className="field-label" style={{ fontSize: 11 }}>RESERVE PRICE</div><strong style={{ fontSize: 18 }}>{money(property.reserve_price)}</strong></div>
                       <div><div className="field-label" style={{ fontSize: 11 }}>EMD</div><strong>{money(property.emd)}</strong></div>
@@ -942,9 +942,9 @@ function Dashboard() {
                     </div>
                     {property.discount_percentage != null && <div style={{ color: "var(--accent-emerald)", fontSize: 13, fontWeight: 700 }}>Estimated {property.discount_percentage.toFixed(0)}% below comparable market value</div>}
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: "auto", paddingTop: 8 }}>
-                      <Link to={`/properties/${property.id}`} style={{ flex: 1, minWidth: 130, textAlign: "center", textDecoration: "none", padding: "10px 12px", borderRadius: 7, background: "var(--accent-primary, #2563eb)", color: "#fff", fontWeight: 700, fontSize: 13 }}>View property</Link>
+                      <Link to={`/properties/${property.id}`} style={{ flex: 1, minWidth: 130, textAlign: "center", textDecoration: "none", padding: "10px 12px", borderRadius: 7, background: "var(--accent-blue, #0095f6)", color: "#fff", fontWeight: 700, fontSize: 13 }}>View property</Link>
                       <button type="button" onClick={() => openAnalyst(property.id, property.address)} style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid var(--border-subtle)", background: "transparent", color: "var(--text-primary)", cursor: "pointer" }}>Ask analyst</button>
-                      {officialUrl && <a href={officialUrl} target="_blank" rel="noreferrer" style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid var(--border-subtle)", color: "var(--accent-primary, #38bdf8)", textDecoration: "none", fontSize: 13, fontWeight: 600 }}>Source listing ↗</a>}
+                      {officialUrl && <a href={officialUrl} target="_blank" rel="noreferrer" style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid var(--border-subtle)", color: "var(--accent-blue, #0095f6)", textDecoration: "none", fontSize: 13, fontWeight: 600 }}>Source listing</a>}
                     </div>
                     {property.estimated_value != null && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Our estimated market value: {money(property.estimated_value)} · Not a bank-verified figure</div>}
                   </div>

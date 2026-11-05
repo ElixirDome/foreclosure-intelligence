@@ -154,7 +154,7 @@ export default function ChatBot() {
           title="Open Research Analyst"
         >
           <div className="trigger-pulse-dot" />
-          <span className="trigger-icon">🤖</span>
+          <span className="trigger-icon">AI</span>
           <span className="trigger-label">Research Analyst</span>
           {activePropertyId && <span className="trigger-scope-badge">Lot #{activePropertyId}</span>}
         </button>
@@ -167,20 +167,20 @@ export default function ChatBot() {
           <header className="analyst-drawer-header">
             <div className="analyst-header-info">
               <div className="analyst-title-row">
-                <span className="analyst-bot-icon">🤖</span>
+                <span className="analyst-bot-icon">AI</span>
                 <span className="analyst-title">Research Analyst</span>
-                <span className="analyst-live-pill">🟢 Multi-Source RAG</span>
+                <span className="analyst-live-pill">Multi-Source RAG</span>
               </div>
               {activePropertyId ? (
                 <div className="analyst-scope-tag">
-                  <span>📌 Scoped to {activePropertyAddress || `Lot #${activePropertyId}`}</span>
+                  <span>Scoped to {activePropertyAddress || `Lot #${activePropertyId}`}</span>
                   <button
                     type="button"
                     className="scope-clear-btn"
                     onClick={clearPropertyScope}
                     title="Clear property focus to search across all inventory"
                   >
-                    ✕ Clear
+                    Clear
                   </button>
                 </div>
               ) : (
@@ -204,7 +204,7 @@ export default function ChatBot() {
                 }
                 title="Clear conversation"
               >
-                🗑️
+                Clear
               </button>
               <button
                 type="button"
@@ -240,15 +240,20 @@ export default function ChatBot() {
 
               return (
                 <div key={m.id} className={`analyst-msg-row ${m.role}`}>
-                  {m.role === "assistant" && <div className="analyst-avatar">🤖</div>}
+                  {m.role === "assistant" && <div className="analyst-avatar">AI</div>}
 
                   <div className="analyst-msg-bubble">
                     <div className="analyst-msg-text">
                       {m.text.split("\n\n").map((para, i) => {
+                        const sanitized = para
+                          .replace(/\*\*(.*?)\*\*/g, "$1")
+                          .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E0}-\u{1F1FF}]/gu, "")
+                          .trim();
+
                         if (para.startsWith("### ") || para.startsWith("#### ")) {
                           return (
                             <h4 key={i} className="analyst-msg-heading">
-                              {para.replace(/^#+\s*/, "")}
+                              {sanitized.replace(/^#+\s*/, "")}
                             </h4>
                           );
                         }
@@ -256,13 +261,18 @@ export default function ChatBot() {
                           const items = para.split("\n").filter((l) => l.trim().length > 0);
                           return (
                             <ul key={i} className="analyst-msg-list">
-                              {items.map((item, j) => (
-                                <li key={j}>{item.replace(/^[-*]\s*/, "")}</li>
-                              ))}
+                              {items.map((item, j) => {
+                                const cleanItem = item
+                                  .replace(/^[-*•]\s*/, "")
+                                  .replace(/\*\*(.*?)\*\*/g, "$1")
+                                  .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E0}-\u{1F1FF}]/gu, "")
+                                  .trim();
+                                return <li key={j}>{cleanItem}</li>;
+                              })}
                             </ul>
                           );
                         }
-                        return <p key={i}>{para}</p>;
+                        return <p key={i}>{sanitized}</p>;
                       })}
 
                       {/* Structured Analysis Notes */}
@@ -273,7 +283,12 @@ export default function ChatBot() {
                               <strong>Supporting Evidence:</strong>
                               <ul>
                                 {m.structured.strengths.map((s, idx) => (
-                                  <li key={idx}>+ {s}</li>
+                                  <li key={idx}>
+                                    {s
+                                      .replace(/^[-*•+]\s*/, "")
+                                      .replace(/\*\*(.*?)\*\*/g, "$1")
+                                      .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E0}-\u{1F1FF}]/gu, "")}
+                                  </li>
                                 ))}
                               </ul>
                             </div>
@@ -284,7 +299,12 @@ export default function ChatBot() {
                               <strong>Identified Risks:</strong>
                               <ul>
                                 {m.structured.risks.map((r, idx) => (
-                                  <li key={idx}>- {r}</li>
+                                  <li key={idx}>
+                                    {r
+                                      .replace(/^[-*•+]\s*/, "")
+                                      .replace(/\*\*(.*?)\*\*/g, "$1")
+                                      .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E0}-\u{1F1FF}]/gu, "")}
+                                  </li>
                                 ))}
                               </ul>
                             </div>
@@ -292,7 +312,7 @@ export default function ChatBot() {
 
                           {m.structured.recommendation && (
                             <div className="analyst-note-box recommendation">
-                              <strong>Bottom Line:</strong> {m.structured.recommendation}
+                              <strong>Bottom Line:</strong> {m.structured.recommendation.replace(/\*\*(.*?)\*\*/g, "$1")}
                             </div>
                           )}
                         </div>
@@ -346,7 +366,7 @@ export default function ChatBot() {
 
             {loading && (
               <div className="analyst-msg-row assistant">
-                <div className="analyst-avatar">🤖</div>
+                <div className="analyst-avatar">AI</div>
                 <div className="analyst-msg-bubble loading">
                   <div className="analyst-typing-dots">
                     <span></span>

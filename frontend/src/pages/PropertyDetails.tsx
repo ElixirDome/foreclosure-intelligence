@@ -494,14 +494,14 @@ function PropertyDetails() {
                   gap: 8,
                   padding: "10px 18px",
                   borderRadius: 8,
-                  background: "var(--accent-primary, #2563eb)",
+                  background: "var(--accent-blue, #0095f6)",
                   color: "#ffffff",
-                  fontWeight: 700,
+                  fontWeight: 600,
                   fontSize: 14,
                   textDecoration: "none",
                 }}
               >
-                🌐 Open Bank Listing Website ↗
+                Open Bank Listing Website
               </a>
             </div>
           )}
@@ -561,7 +561,7 @@ function PropertyDetails() {
                           target="_blank"
                           rel="noreferrer"
                         >
-                          Source link ↗
+                          Source link
                         </a>
                       )}
                       {!pdfHref && !directSourceLink && (
@@ -641,7 +641,7 @@ function PropertyDetails() {
               style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, fontSize: 13 }}
               onClick={() => openAnalyst(Number(id), property?.address, "Is this property a good foreclosure investment?")}
             >
-              🤖 Open Contextual Research Analyst
+              Open Contextual Research Analyst
             </button>
           </div>
           <p className="muted">

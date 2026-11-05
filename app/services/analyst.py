@@ -133,10 +133,10 @@ def process_analyst_turn(
             question=q_clean,
             answer=(
                 "### Confidential Banking Records Notice\n\n"
-                "⚠️ **Private Settlement & OTS Records Are Not Public**\n"
-                "- One-Time Settlement (OTS) figures, borrower compromise arrangements, and private bank concessions are confidential.\n"
-                "- Official SARFAESI auction notices state only the verified Reserve Price, Earnest Money Deposit (EMD), and Auction Date.\n"
-                "- Foreclosure Intelligence strictly relies on published public auction records and refuses to speculate on non-public banking matters."
+                "Private Settlement & OTS Records Are Not Public\n"
+                "One-Time Settlement (OTS) figures, borrower compromise arrangements, and private bank concessions are confidential.\n"
+                "Official SARFAESI auction notices state only the verified Reserve Price, Earnest Money Deposit (EMD), and Auction Date.\n"
+                "Foreclosure Intelligence strictly relies on published public auction records and refuses to speculate on non-public banking matters."
             ),
             property_id=resolved_prop_id,
             citations=[
@@ -235,21 +235,21 @@ def _handle_source_onboarding_inquiry(question: str, q_lower: str) -> AnalystRes
         "",
         "Foreclosure Intelligence autonomously crawls and monitors bank e-auction portals. Here is how to connect a source:",
         "",
-        "1. **Autonomous Discovery**:",
-        "   - Navigate to the **Admin Import Desk** (`/admin/import`).",
-        "   - Enter the bank name (e.g. `PNB`, `IBAPI`, `SBI`) or root website address.",
-        "   - The autonomous crawler inspects navigation menus, sitemaps, SARFAESI auction grids, and downloadable notices.",
-        "   - Review the discovered endpoint and sample preview, then click **Connect Source**.",
+        "1. Autonomous Discovery:",
+        "   Navigate to the Admin Import Desk (/admin/import).",
+        "   Enter the bank name (e.g. PNB, IBAPI, SBI) or root website address.",
+        "   The autonomous crawler inspects navigation menus, sitemaps, SARFAESI auction grids, and downloadable notices.",
+        "   Review the discovered endpoint and sample preview, then click Connect Source.",
         "",
-        "2. **Supported Auction Portals**:",
-        "   - **Punjab National Bank (PNB)**: Direct listings at `https://www.pnb.bank.in/EAuction.aspx`.",
-        "   - **IBAPI (e-Bkray)**: Centralized portal for public sector banks at `https://ibapi.in`.",
-        "   - **Custom Bank Portals**: Any public bank portal displaying SARFAESI auction tables or notice PDFs.",
+        "2. Supported Auction Portals:",
+        "   Punjab National Bank (PNB): Direct listings at https://www.pnb.bank.in/EAuction.aspx.",
+        "   IBAPI (e-Bkray): Centralized portal for public sector banks at https://ibapi.in.",
+        "   Custom Bank Portals: Any public bank portal displaying SARFAESI auction tables or notice PDFs.",
         "",
-        "3. **What if endpoint discovery cannot locate listings?**",
-        "   - Some bank sites use dynamic JavaScript or Cloudflare bot checks.",
-        "   - **Solution**: Open the bank's site in your browser, click 'Tenders' or 'E-Auctions / SARFAESI Notices', and copy the direct URL of the auction table or PDF view page.",
-        "   - Paste that exact URL into the Admin Import Desk; our validator will immediately verify tabular headers and document links.",
+        "3. What if endpoint discovery cannot locate listings?",
+        "   Some bank sites use dynamic JavaScript or Cloudflare bot checks.",
+        "   Solution: Open the bank site in your browser, click Tenders or E-Auctions / SARFAESI Notices, and copy the direct URL of the auction table or PDF view page.",
+        "   Paste that exact URL into the Admin Import Desk; our validator will immediately verify tabular headers and document links.",
     ]
 
     action_links = [
@@ -348,8 +348,8 @@ def _handle_representative_inquiry(db: Session, property_id: int | None, questio
                 "### Bank Representative & Contact Inquiries\n\n"
                 "To look up the authorized officer or representative for a foreclosure auction, "
                 "please specify the property lot or open a property:\n"
-                "- E.g.: *\"Who is the representative for Lot #40?\"*\n"
-                "- Or click **Ask Analyst** on any property card from the dashboard."
+                "Example: Who is the representative for Lot #40?\n"
+                "Or click Ask Analyst on any property card from the dashboard."
             ),
             intent="representative_inquiry",
             action_links=[{"title": "Open Dashboard", "url": "/dashboard"}],
@@ -371,10 +371,10 @@ def _handle_representative_inquiry(db: Session, property_id: int | None, questio
             question=question,
             answer=(
                 f"### Bank Representative for Lot #{prop.id}\n"
-                f"**Property**: {prop.address}\n\n"
-                f"⚠️ **Notice Document Missing**\n"
-                f"- No auction notice documents are currently linked to Property #{prop.id} on record.\n"
-                f"- **Recommendation**: Contact the secured creditor directly or verify the auction listing in the Admin Import desk."
+                f"Property: {prop.address}\n\n"
+                f"Notice Document Missing\n"
+                f"No auction notice documents are currently linked to Property #{prop.id} on record.\n"
+                f"Recommendation: Contact the secured creditor directly or verify the auction listing in the Admin Import desk."
             ),
             property_id=property_id,
             intent="representative_inquiry",
@@ -480,15 +480,15 @@ def _handle_representative_inquiry(db: Session, property_id: int | None, questio
 
         lines = [
             f"### Bank Representative & Contact Inquiries for Lot #{prop.id}",
-            f"**Property**: {prop.address}",
+            f"Property: {prop.address}",
             "",
-            "⚠️ **Representative Contact Details Not Found in Notice**",
-            f"- The indexed auction notice (**{doc_title}**) does not list a direct designated authorized officer name, contact phone, or branch email for this property.",
-            f"- **Secured Creditor**: {bank_label}",
+            "Representative Contact Details Not Found in Notice",
+            f"The indexed auction notice ({doc_title}) does not list a direct designated authorized officer name, contact phone, or branch email for this property.",
+            f"Secured Creditor: {bank_label}",
             "",
-            "#### Suggested Next Steps:",
-            "- Review the full original auction notice PDF for unindexed fine print or addenda.",
-            "- Inquire directly with the bank's nearest regional asset recovery or SARFAESI branch.",
+            "Suggested Next Steps:",
+            "Review the full original auction notice PDF for unindexed fine print or addenda.",
+            "Inquire directly with the bank nearest regional asset recovery or SARFAESI branch.",
         ]
         if ref_doc:
             citations.append(
@@ -536,8 +536,8 @@ def _handle_valuation_explanation(db: Session, property_id: int, question: str) 
 
     lines = [
         f"### Valuation Breakdown for Lot #{prop.id}",
-        f"**Address**: {prop.address} ({prop.city or 'Unspecified City'})",
-        f"**Asset Scope**: {prop.property_type or 'Residential Property'} · Area: {prop.area_sqft or 'Unknown'} sq.ft.",
+        f"Address: {prop.address} ({prop.city or 'Unspecified City'})",
+        f"Asset Scope: {prop.property_type or 'Residential Property'} | Area: {prop.area_sqft or 'Unknown'} sq ft",
         "",
     ]
 
@@ -724,9 +724,9 @@ def _handle_original_document_inquiry(db: Session, property_id: int, question: s
 
     lines = [
         f"### Original Auction Notice for Lot #{prop.id}",
-        f"**Property**: {prop.address}",
+        f"Property: {prop.address}",
         "",
-        f"Found **{len(docs)}** verified source notice document(s) on file:",
+        f"Found {len(docs)} verified source notice document(s) on file:",
         "",
     ]
 
@@ -747,11 +747,11 @@ def _handle_original_document_inquiry(db: Session, property_id: int, question: s
         pub_str = first_seen.strftime("%d %b %Y") if first_seen else "Unknown"
         check_str = last_seen.strftime("%d %b %Y %H:%M UTC") if last_seen else "Recent"
         lines.extend([
-            f"📄 **{d.title or 'Auction Notice Document'}**",
-            f"- **Publishing Source**: {d.source_name or 'Bank Portal'}",
-            f"- **Notice Type**: `{d.document_type or 'auction_notice'}`",
-            f"- **Recorded at**: {pub_str} | **Last checked**: {check_str}",
-            f"- **Original Source URL**: {d.source_url or 'Stored PDF'}",
+            f"{d.title or 'Auction Notice Document'}",
+            f"Publishing Source: {d.source_name or 'Bank Portal'}",
+            f"Notice Type: {d.document_type or 'auction_notice'}",
+            f"Recorded at: {pub_str} | Last checked: {check_str}",
+            f"Original Source URL: {d.source_url or 'Stored PDF'}",
             "",
         ])
         action_links.append({
@@ -797,8 +797,8 @@ def _handle_validity_verification(
                 "### Property Verification & Detail Validity\n\n"
                 "To verify property details, reserve price, OCR extraction confidence, and SARFAESI possession status, "
                 "please specify the property lot number:\n"
-                "- E.g.: *\"Are the details valid for Lot #1?\"*\n"
-                "- Or click **Ask Analyst** on any property card from the dashboard."
+                "Example: Are the details valid for Lot #1?\n"
+                "Or click Ask Analyst on any property card from the dashboard."
             ),
             intent="validity_verification",
             action_links=[{"title": "Open Filtered Dashboard", "url": "/dashboard"}],
@@ -1109,7 +1109,7 @@ def _handle_discovery_search(
     title_heading = "Top Curated Auction Deals" if is_best_query else "Latest Residential Auctions"
     lines = [
         f"### {title_heading} ({loc_desc})",
-        f"Found **{len(results)}** active residential auction lots:",
+        f"Found {len(results)} active residential auction lots:",
         "",
     ]
 

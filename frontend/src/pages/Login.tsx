@@ -76,7 +76,7 @@ function Login() {
     <div className="ig-auth-wrapper">
       <div className="ig-auth-card">
         <div className="ig-brand-header">
-          <div className="ig-brand-badge">⚡ FORECLOSURE INTELLIGENCE</div>
+          <div className="ig-brand-badge">FORECLOSURE INTELLIGENCE</div>
           <h1 className="ig-brand-title">Welcome back</h1>
           <p className="ig-brand-subtitle">
             Track bank e-auctions, reserve pricing & deal valuation

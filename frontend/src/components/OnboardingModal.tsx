@@ -116,7 +116,7 @@ export default function OnboardingModal({ isOpen, onClose, onComplete }: Props) 
         {step === 1 && (
           <div className="onboarding-step-body">
             <div className="onboarding-header">
-              <span className="onboarding-badge">🚀 WELCOME TO FORECLOSURE INTELLIGENCE</span>
+              <span className="onboarding-badge">WELCOME TO FORECLOSURE INTELLIGENCE</span>
               <h2>Set Your Local Research Desk</h2>
               <p className="onboarding-desc">
                 Select the geographic territory and property category you want to monitor for bank e-auctions, reserve prices, and valuation discounts.
@@ -311,7 +311,7 @@ export default function OnboardingModal({ isOpen, onClose, onComplete }: Props) 
                 onClick={handleSavePreferences}
                 disabled={saving}
               >
-                {saving ? "Activating Desk..." : "🚀 Activate Desk & Open Inventory"}
+                {saving ? "Activating Desk..." : "Activate Desk & Open Inventory"}
               </button>
             </div>
           </div>

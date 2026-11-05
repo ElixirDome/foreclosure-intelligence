@@ -332,7 +332,6 @@ function Import() {
           <div className="live-ingestion-tracker">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 20 }}>⚡</span>
                 <strong style={{ fontSize: 15, color: "var(--text-primary)" }}>
                   Live Ingestion Pipeline: {liveIngestion.source || "Background Worker"}
                 </strong>
@@ -369,9 +368,9 @@ function Import() {
                 }`}
               >
                 <div className="tracker-stage-icon">
-                  {liveIngestion.stage === "discovery_started" ? "🔄" : "🔍"}
+                  Step 1
                 </div>
-                <span className="tracker-stage-label">1. Discovery</span>
+                <span className="tracker-stage-label">Discovery</span>
                 {liveIngestion.discovery_time_ms != null && (
                   <small style={{ fontSize: 11, color: "var(--text-muted)" }}>
                     {liveIngestion.discovery_time_ms}ms
@@ -389,9 +388,9 @@ function Import() {
                 }`}
               >
                 <div className="tracker-stage-icon">
-                  {liveIngestion.stage === "documents_discovered" ? "🔄" : "📥"}
+                  Step 2
                 </div>
-                <span className="tracker-stage-label">2. Fetching ({liveIngestion.items_found ?? 0})</span>
+                <span className="tracker-stage-label">Fetching ({liveIngestion.items_found ?? 0})</span>
               </div>
 
               <div
@@ -404,10 +403,10 @@ function Import() {
                 }`}
               >
                 <div className="tracker-stage-icon">
-                  {liveIngestion.stage === "extraction_completed" ? "🔄" : "🧠"}
+                  Step 3
                 </div>
                 <span className="tracker-stage-label">
-                  3. Extraction ({liveIngestion.items_extracted ?? 0})
+                  Extraction ({liveIngestion.items_extracted ?? 0})
                 </span>
                 {liveIngestion.extraction_time_ms != null && (
                   <small style={{ fontSize: 11, color: "var(--text-muted)" }}>
@@ -422,10 +421,10 @@ function Import() {
                 }`}
               >
                 <div className="tracker-stage-icon">
-                  {liveIngestion.stage === "completed" ? "✅" : "💾"}
+                  Step 4
                 </div>
                 <span className="tracker-stage-label">
-                  4. Persistence ({liveIngestion.items_saved ?? 0} saved)
+                  Persistence ({liveIngestion.items_saved ?? 0} saved)
                 </span>
               </div>
             </div>
@@ -460,7 +459,7 @@ function Import() {
                   paddingTop: 8,
                 }}
               >
-                <span>⏱️ Total Latency: <strong>{liveIngestion.latency.total_time_ms ?? 0}ms</strong></span>
+                <span>Total Latency: <strong>{liveIngestion.latency.total_time_ms ?? 0}ms</strong></span>
                 <span>Fetch: <strong>{liveIngestion.latency.discovery_and_fetch_ms ?? 0}ms</strong></span>
                 <span>OCR/Extract: <strong>{liveIngestion.latency.extraction_ms ?? 0}ms</strong></span>
                 <span>Commit: <strong>{liveIngestion.latency.commit_time_ms ?? 0}ms</strong></span>
@@ -475,7 +474,7 @@ function Import() {
             className={`desk-tab-btn ${activeTab === "discover" ? "active" : ""}`}
             onClick={() => setActiveTab("discover")}
           >
-            <span>✨ Autonomous Source Discovery</span>
+            <span>Autonomous Source Discovery</span>
           </button>
 
           <button
@@ -486,7 +485,7 @@ function Import() {
               loadSources();
             }}
           >
-            <span>📡 Connected Portals ({sources.length})</span>
+            <span>Connected Portals ({sources.length})</span>
           </button>
 
           <button
@@ -494,7 +493,7 @@ function Import() {
             className={`desk-tab-btn ${activeTab === "pdf" ? "active" : ""}`}
             onClick={() => setActiveTab("pdf")}
           >
-            <span>📄 Direct PDF Ingest</span>
+            <span>Direct PDF Ingest</span>
           </button>
         </div>
 
@@ -529,7 +528,7 @@ function Import() {
                       className="desk-btn-primary"
                       disabled={discovering || !discoverQuery.trim()}
                     >
-                      {discovering ? "Inspecting Portal..." : "✨ Discover Endpoints"}
+                      {discovering ? "Inspecting Portal..." : "Discover Endpoints"}
                     </button>
                   </div>
                 </div>
@@ -554,7 +553,7 @@ function Import() {
                   <div className="discovery-header-strip">
                     <div>
                       <span className={`discovery-status-badge ${discoveryResult.status}`}>
-                        {discoveryResult.status === "discovered" ? "🟢 Verified Route Discovered" : discoveryResult.status === "partial" ? "🟡 Partial Discovery" : "🔴 Discovery Obstacle"}
+                        {discoveryResult.status === "discovered" ? "Verified Route Discovered" : discoveryResult.status === "partial" ? "Partial Discovery" : "Discovery Obstacle"}
                       </span>
                       <h3 style={{ margin: "8px 0 4px 0", fontSize: 18 }}>{discoveryResult.source_name}</h3>
                       <p className="muted" style={{ margin: 0, fontSize: 13 }}>
@@ -573,7 +572,7 @@ function Import() {
                     <h4>Discovery Evidence & Network Diagnostics</h4>
                     <ul className="discovery-evidence-list">
                       {discoveryResult.evidence.map((ev, idx) => (
-                        <li key={idx}>✓ {ev}</li>
+                        <li key={idx}>{ev}</li>
                       ))}
                     </ul>
                   </div>
@@ -589,7 +588,7 @@ function Import() {
                             <span className="discovery-sample-desc">{item.details}</span>
                             {item.document_url && (
                               <a href={item.document_url} target="_blank" rel="noreferrer" className="discovery-sample-link">
-                                📄 View Notice PDF ↗
+                                View Notice PDF
                               </a>
                             )}
                           </div>
@@ -704,7 +703,7 @@ function Import() {
                   disabled={loading || !connectUrl.trim()}
                   style={{ width: "100%", marginTop: 12, padding: "14px 20px" }}
                 >
-                  {loading ? "Registering Source..." : "🚀 Activate Ingestion & Connect Source"}
+                  {loading ? "Registering Source..." : "Activate Ingestion & Connect Source"}
                 </button>
               </form>
             </section>
@@ -725,7 +724,7 @@ function Import() {
                 onClick={loadSources}
                 disabled={sourcesLoading}
               >
-                {sourcesLoading ? "Refreshing..." : "🔄 Refresh Status"}
+                {sourcesLoading ? "Refreshing..." : "Refresh Status"}
               </button>
             </div>
 
@@ -737,7 +736,7 @@ function Import() {
                   className="desk-btn-primary"
                   onClick={() => setActiveTab("discover")}
                 >
-                  ✨ Discover & Connect a Bank Portal
+                  Discover & Connect a Bank Portal
                 </button>
               </div>
             ) : (
@@ -796,7 +795,7 @@ function Import() {
                             onClick={() => handleRunSource(s.id)}
                             disabled={syncingId === s.id || !s.enabled}
                           >
-                            {syncingId === s.id ? "Syncing..." : "⚡ Sync Now"}
+                            {syncingId === s.id ? "Syncing..." : "Sync Now"}
                           </button>
                         </td>
                       </tr>

@@ -141,7 +141,7 @@ export default function Research() {
             ← Desk
           </Link>
           <div className="ai-title-wrap">
-            <span className="ai-avatar-icon">🤖</span>
+            <span className="ai-avatar-icon">AI</span>
             <div className="ai-title-text">
               <h2>Research Analyst</h2>
               <div className="ai-status-indicator">
@@ -178,7 +178,7 @@ export default function Research() {
       <main className="ai-chat-body">
         {messages.length === 0 && (
           <div className="ai-empty-hero">
-            <div className="ai-empty-icon">⚡</div>
+            <div className="ai-empty-icon">AI</div>
             <h3>How can I help with your foreclosure analysis?</h3>
             <p>
               Ask about property valuation, auction terms, reserve prices, or comparative market data.
@@ -204,12 +204,17 @@ export default function Research() {
           {messages.map((m) => (
             <div key={m.id} className={`ai-message-row ${m.role}`}>
               {m.role === "assistant" && (
-                <div className="ai-bot-avatar">🤖</div>
+                <div className="ai-bot-avatar">AI</div>
               )}
 
               <div className="ai-message-bubble">
                 <div className="ai-message-content">
-                  <p>{m.text}</p>
+                  <p>
+                    {m.text
+                      .replace(/\*\*(.*?)\*\*/g, "$1")
+                      .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E0}-\u{1F1FF}]/gu, "")
+                      .trim()}
+                  </p>
 
                   {m.structured && (
                     <div className="ai-structured-note">
@@ -251,7 +256,7 @@ export default function Research() {
 
           {loading && (
             <div className="ai-message-row assistant">
-              <div className="ai-bot-avatar">🤖</div>
+              <div className="ai-bot-avatar">AI</div>
               <div className="ai-message-bubble loading-bubble">
                 <div className="ai-typing-dots">
                   <span></span>
