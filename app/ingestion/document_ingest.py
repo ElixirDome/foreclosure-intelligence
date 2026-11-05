@@ -136,9 +136,18 @@ def ingest_document(
     source = _as_source_document(raw)
 
     if pages is None:
-        pages = extract_pages_from_source(source)
-    if pages is None:
-        raw_text = getattr(source, "extracted_text", None) or getattr(raw, "extracted_text", None)
+        if isinstance(raw, dict) and raw.get("pages"):
+            pages = raw["pages"]
+        elif hasattr(raw, "pages") and getattr(raw, "pages"):
+            pages = getattr(raw, "pages")
+        else:
+            pages = extract_pages_from_source(source)
+
+    if not pages:
+        raw_text = (
+            getattr(source, "extracted_text", None)
+            or (raw.get("extracted_text") if isinstance(raw, dict) else getattr(raw, "extracted_text", None))
+        )
         pages = [raw_text] if raw_text else []
 
     extracted_text = "\n\n".join(
@@ -196,14 +205,20 @@ def ingest_documents(
     *,
     force_rechunk: bool = False,
 ) -> list[dict[str, Any]]:
-    """Ingest many documents; returns one result dict per input."""
+    """Ingest many documents; returns one result dict per input, isolating failures."""
+    import logging
+    logger = logging.getLogger(__name__)
     results = []
     for raw in raw_docs:
-        results.append(
-            ingest_document(
-                db,
-                raw,
-                force_rechunk=force_rechunk,
-            )
-        )
+        try:
+            with db.begin_nested():
+                results.append(
+                    ingest_document(
+                        db,
+                        raw,
+                        force_rechunk=force_rechunk,
+                    )
+                )
+        except Exception as exc:
+            logger.error("Failed to ingest document item: %s", exc, exc_info=True)
     return results

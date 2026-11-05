@@ -8,6 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 from app.services.property_classifier import is_residential_property
 from app.ingestion.base import SourceAdapter
+from app.services.pdf import extract_pages_from_pdf
 from app.services.pnb_extraction import extract_pnb_property
 from app.services.pnb_extraction import extract_pnb_properties
 from app.services.live_events import broker
@@ -233,39 +234,24 @@ class PNBSourceAdapter(SourceAdapter):
 
         return downloaded_items
 
-    def _extract_native_text(self, pdf_path):
-        try:
-            from pypdf import PdfReader
-            reader = PdfReader(str(pdf_path))
-            pages = []
-            for page in reader.pages:
-                pages.append(page.extract_text() or "")
-            return "\n".join(pages).strip()
-        except Exception:
-            return ""
+    def _get_pages(self, item_or_path):
+        if isinstance(item_or_path, dict) and item_or_path.get("pages"):
+            return item_or_path["pages"]
+        path = item_or_path.get("pdf_path") if isinstance(item_or_path, dict) else item_or_path
+        pages = extract_pages_from_pdf(path)
+        if isinstance(item_or_path, dict):
+            item_or_path["pages"] = pages
+            item_or_path["_extracted_text"] = "\n".join(pages).strip()
+        return pages
 
-    @staticmethod
-    def _native_text_is_usable(text):
-        """Reject long but broken CID/font-map extraction before trusting it."""
-        if len(text.strip()) < 200:
-            return False
-        visible = [char for char in text if not char.isspace()]
-        if not visible:
-            return False
-        alpha = sum(char.isalpha() for char in visible)
-        cid_fragments = len(re.findall(r"\(cid:\d+\)", text, re.IGNORECASE))
-        return alpha / len(visible) >= 0.42 and text.count("\ufffd") < 5 and cid_fragments < 8
-
-    def _get_text(self, pdf_path):
-        native = self._extract_native_text(pdf_path)
-        if self._native_text_is_usable(native):
-            return native
-        try:
-            ocr = self._extract_ocr_text(pdf_path)
-        except Exception as exc:
-            print(f"  OCR fallback failed: {exc}")
-            return native
-        return ocr if len(ocr.strip()) >= 100 else native
+    def _get_text(self, item_or_path):
+        if isinstance(item_or_path, dict) and item_or_path.get("_extracted_text"):
+            return item_or_path["_extracted_text"]
+        pages = self._get_pages(item_or_path)
+        text = "\n".join(pages).strip()
+        if isinstance(item_or_path, dict):
+            item_or_path["_extracted_text"] = text
+        return text
 
     def extract(self, item):
         title = item.get("title", "")
@@ -278,7 +264,7 @@ class PNBSourceAdapter(SourceAdapter):
                 "timestamp": time.time(),
             },
         )
-        text = self._get_text(item["pdf_path"])
+        text = self._get_text(item)
         print("\n--- OCR TEXT SAMPLE ---")
         print(repr(text[:2500]))
         print("--- END OCR SAMPLE ---\n")
@@ -314,18 +300,24 @@ class PNBSourceAdapter(SourceAdapter):
         return valid_properties
 
     def get_documents(self, item):
+        content = b""
+        if "pdf_path" in item and Path(item["pdf_path"]).exists():
+            content = Path(item["pdf_path"]).read_bytes()
         return [
             {
                 "source_name": "PNB",
                 "source_url": item["source_url"],
                 "document_type": "auction_notice",
                 "title": item["title"],
-                "content": item["pdf_path"].read_bytes(),
+                "content": content,
+                "storage_path": str(item["pdf_path"]) if "pdf_path" in item else None,
+                "pages": item.get("pages"),
+                "extracted_text": item.get("_extracted_text"),
             }
         ]
 
     def get_evidence(self, item):
-        text = self._get_text(item["pdf_path"])
+        text = self._get_text(item)
         properties = extract_pnb_properties(text) or []
         evidence = []
         for prop in properties:

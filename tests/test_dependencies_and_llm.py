@@ -148,7 +148,8 @@ class TestLLMFallbackAndDegradation:
         assert "123 Fail Safe Rd" in result.summary
         assert len(result.due_diligence) >= 2
 
-    def test_get_llm_provider_returns_instance(self):
+    def test_get_llm_provider_returns_instance(self, monkeypatch):
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         provider = get_llm_provider()
         assert isinstance(provider, LocalLLMProvider)
         assert hasattr(provider, "is_available")

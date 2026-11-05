@@ -163,7 +163,12 @@ def run_ingestion(
                 extraction_errors.append(str(exc))
                 extracted = None
 
-            documents = adapter.get_documents(item) or []
+            try:
+                documents = adapter.get_documents(item) or []
+            except Exception as exc:
+                logger.exception("Failed getting documents from item: %s", exc)
+                extraction_errors.append(f"get_documents failed: {exc}")
+                documents = []
 
             pages = None
             if isinstance(item, dict):
@@ -172,9 +177,15 @@ def run_ingestion(
 
             if not extracted:
                 # Keep source documents even when property extraction fails or returns no properties.
-                document_only_items.extend(
-                    (document, pages) for document in documents
-                )
+                for document in documents:
+                    doc_pages = None
+                    if isinstance(document, dict):
+                        doc_pages = document.get("pages")
+                    elif hasattr(document, "pages"):
+                        doc_pages = getattr(document, "pages", None)
+                    if not doc_pages and len(documents) == 1:
+                        doc_pages = pages
+                    document_only_items.append((document, doc_pages))
                 continue
 
             get_evidence = getattr(
@@ -230,21 +241,28 @@ def run_ingestion(
         )
 
         document_only_count = 0
-        for raw_document, pages in document_only_items:
-            ingest_document(db, raw_document, pages=pages)
-            document_only_count += 1
+        for raw_document, doc_pages in document_only_items:
+            try:
+                with db.begin_nested():
+                    ingest_document(db, raw_document, pages=doc_pages)
+                    document_only_count += 1
+            except Exception as exc:
+                logger.error("Failed to ingest document-only item: %s", exc, exc_info=True)
+                extraction_errors.append(f"Document ingestion failed: {exc}")
         if document_only_count:
             db.commit()
 
         latency_metrics["commit_time_ms"] = round((time.time() - t2) * 1000)
         latency_metrics["total_time_ms"] = round((time.time() - t_start) * 1000)
 
+        failed_docs = save_result.get("failed_documents", [])
+
         # Distinguish zero property extraction vs real success
         if len(raw_items) > 0 and len(extracted_items) == 0:
             final_status = "zero_properties_extracted"
         elif len(raw_items) == 0:
             final_status = "no_items_found"
-        elif len(extraction_errors) > 0:
+        elif len(extraction_errors) > 0 or len(failed_docs) > 0:
             final_status = "partial_success"
         else:
             final_status = "success"
@@ -254,6 +272,11 @@ def run_ingestion(
         ingestion_run.items_found = len(raw_items)
         ingestion_run.items_created = len(save_result["saved"])
         ingestion_run.items_skipped = len(save_result["skipped"])
+        if extraction_errors or failed_docs:
+            err_msg = "; ".join(extraction_errors[:3])
+            if failed_docs:
+                err_msg += f" (and {len(failed_docs)} document failures)"
+            ingestion_run.error_message = err_msg.strip()
         db.commit()
 
         broker.publish(

@@ -1,3 +1,4 @@
+import logging
 import time
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +12,8 @@ from app.models import (
     PropertyDocument,
 )
 from app.services.normalization import create_property_key
+
+logger = logging.getLogger(__name__)
 
 
 def _evidence_value(evidence):
@@ -141,6 +144,7 @@ def save_ingested_properties(
     """
     saved = []
     skipped = []
+    failed_documents = []
 
     for item in properties:
         property_data = item["property"]
@@ -232,79 +236,109 @@ def save_ingested_properties(
 
         for document_data in documents:
             payload = _normalize_document_payload(document_data)
-            pages = item.get("pages")
+            try:
+                with db.begin_nested():
+                    # 1. Document-specific page association:
+                    # Check if document_data or payload has its own extracted pages
+                    doc_pages = None
+                    if isinstance(document_data, dict):
+                        doc_pages = document_data.get("pages")
+                    elif hasattr(document_data, "pages"):
+                        doc_pages = getattr(document_data, "pages", None)
 
-            ingest_result = ingest_document(
-                db,
-                payload,
-                pages=pages,
-            )
-            document = ingest_result["document"]
+                    if not doc_pages and isinstance(payload, dict):
+                        doc_pages = payload.get("pages")
 
-            existing_relationship = (
-                db.query(PropertyDocument)
-                .filter(
-                    PropertyDocument.property_id == property_obj.id,
-                    PropertyDocument.document_id == document.id,
-                )
-                .first()
-            )
+                    # Only reuse item pages if this is a single 1-to-1 document association
+                    if not doc_pages and len(documents) == 1 and item.get("pages"):
+                        doc_pages = item.get("pages")
 
-            if not existing_relationship:
-                property_document = PropertyDocument(
-                    property_id=property_obj.id,
-                    document_id=document.id,
-                    relationship_type=payload.get(
-                        "document_type",
-                        document.document_type,
-                    ),
-                )
-                try:
-                    with db.begin_nested():
-                        db.add(property_document)
-                        db.flush()
-                except IntegrityError:
-                    # The unique (property_id, document_id) constraint is the
-                    # final guard if concurrent workers attach the same doc.
-                    pass
-
-            # Evidence belongs to the property + document.
-            for raw_evidence in evidence_items:
-                evidence_data = _evidence_value(raw_evidence)
-
-                existing_evidence = (
-                    db.query(Evidence)
-                    .filter(
-                        Evidence.property_id == property_obj.id,
-                        Evidence.document_id == document.id,
-                        Evidence.field == evidence_data["field"],
-                        Evidence.value == str(evidence_data["value"]),
-                        Evidence.page_number
-                        == evidence_data.get("page_number"),
+                    ingest_result = ingest_document(
+                        db,
+                        payload,
+                        pages=doc_pages,
                     )
-                    .first()
-                )
+                    document = ingest_result["document"]
 
-                if existing_evidence:
-                    continue
-
-                db.add(
-                    Evidence(
-                        property_id=property_obj.id,
-                        document_id=document.id,
-                        document_chunk_id=evidence_data.get(
-                            "document_chunk_id"
-                        ),
-                        field=evidence_data["field"],
-                        value=str(evidence_data["value"]),
-                        page_number=evidence_data.get("page_number"),
-                        source_text=evidence_data.get("source_text"),
-                        extraction_method=evidence_data.get(
-                            "extraction_method"
-                        ),
-                        confidence=evidence_data.get("confidence"),
+                    existing_relationship = (
+                        db.query(PropertyDocument)
+                        .filter(
+                            PropertyDocument.property_id == property_obj.id,
+                            PropertyDocument.document_id == document.id,
+                        )
+                        .first()
                     )
+
+                    if not existing_relationship:
+                        property_document = PropertyDocument(
+                            property_id=property_obj.id,
+                            document_id=document.id,
+                            relationship_type=payload.get(
+                                "document_type",
+                                document.document_type,
+                            ),
+                        )
+                        try:
+                            with db.begin_nested():
+                                db.add(property_document)
+                                db.flush()
+                        except IntegrityError:
+                            # The unique (property_id, document_id) constraint is the
+                            # final guard if concurrent workers attach the same doc.
+                            pass
+
+                    # Evidence belongs to the property + document.
+                    for raw_evidence in evidence_items:
+                        evidence_data = _evidence_value(raw_evidence)
+
+                        existing_evidence = (
+                            db.query(Evidence)
+                            .filter(
+                                Evidence.property_id == property_obj.id,
+                                Evidence.document_id == document.id,
+                                Evidence.field == evidence_data["field"],
+                                Evidence.value == str(evidence_data["value"]),
+                                Evidence.page_number
+                                == evidence_data.get("page_number"),
+                            )
+                            .first()
+                        )
+
+                        if existing_evidence:
+                            continue
+
+                        db.add(
+                            Evidence(
+                                property_id=property_obj.id,
+                                document_id=document.id,
+                                document_chunk_id=evidence_data.get(
+                                    "document_chunk_id"
+                                ),
+                                field=evidence_data["field"],
+                                value=str(evidence_data["value"]),
+                                page_number=evidence_data.get("page_number"),
+                                source_text=evidence_data.get("source_text"),
+                                extraction_method=evidence_data.get(
+                                    "extraction_method"
+                                ),
+                                confidence=evidence_data.get("confidence"),
+                            )
+                        )
+            except Exception as exc:
+                doc_title = (
+                    (payload.get("title") or payload.get("source_url") or "unknown_doc")
+                    if "payload" in locals() and isinstance(payload, dict)
+                    else "unknown_doc"
                 )
+                logger.error(
+                    "Document ingestion failed for '%s' on Property #%s: %s",
+                    doc_title, property_obj.id, exc, exc_info=True,
+                )
+                failed_documents.append({
+                    "document": doc_title,
+                    "property_id": property_obj.id,
+                    "error": str(exc),
+                })
 
     ingestion_run = (
         db.query(IngestionRun)
@@ -382,5 +416,6 @@ def save_ingested_properties(
     return {
         "saved": saved,
         "skipped": skipped,
+        "failed_documents": failed_documents,
     }
 
