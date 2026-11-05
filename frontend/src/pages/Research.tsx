@@ -242,18 +242,6 @@ export default function Research() {
                       )}
                     </div>
                   )}
-
-                  {m.citations && m.citations.length > 0 && (
-                    <div className="ai-citations-strip">
-                      <span className="ai-citation-label">Sources:</span>
-                      {m.citations.slice(0, 4).map((c, idx) => (
-                        <span key={idx} className="ai-citation-pill" title={c.excerpt || c.title || undefined}>
-                          📄 {c.title || c.source_name || "Notice"}
-                          {c.page_number != null ? ` (p.${c.page_number})` : ""}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
 
                 <span className="ai-timestamp">{m.timestamp}</span>

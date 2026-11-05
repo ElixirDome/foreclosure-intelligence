@@ -235,9 +235,8 @@ export default function ChatBot() {
           {/* Messages Stream */}
           <div className="analyst-messages-stream">
             {messages.map((m) => {
-              // Extract action links and regular citations
+              // Extract action links
               const actionCitations = m.citations?.filter((c) => c.kind === "action" && Boolean(c.source_id)) || [];
-              const sourceCitations = m.citations?.filter((c) => c.kind !== "action") || [];
 
               return (
                 <div key={m.id} className={`analyst-msg-row ${m.role}`}>
@@ -337,33 +336,6 @@ export default function ChatBot() {
                           })}
                         </div>
                       )}
-
-                      {/* Source Citations with Strict Deduplication */}
-                      {(() => {
-                        const seenKeys = new Set<string>();
-                        const uniqueCitations = sourceCitations.filter((c) => {
-                          const key = `${c.document_id ?? ""}-${c.page_number ?? ""}-${c.title || c.source_name || ""}`;
-                          if (seenKeys.has(key)) return false;
-                          seenKeys.add(key);
-                          return true;
-                        });
-                        if (uniqueCitations.length === 0) return null;
-                        return (
-                          <div className="analyst-citations-wrap">
-                            <span className="analyst-citations-label">Sources:</span>
-                            {uniqueCitations.slice(0, 4).map((c, idx) => (
-                              <span
-                                key={idx}
-                                className="analyst-citation-chip"
-                                title={c.excerpt || c.title || undefined}
-                              >
-                                📄 {c.title || c.source_name || "Notice"}
-                                {c.page_number != null ? ` (p.${c.page_number})` : ""}
-                              </span>
-                            ))}
-                          </div>
-                        );
-                      })()}
                     </div>
 
                     <span className="analyst-timestamp">{m.timestamp}</span>
