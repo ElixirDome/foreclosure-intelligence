@@ -213,7 +213,11 @@ class GeminiProvider(LLMProvider):
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY not configured")
 
-        url = f"{self.base_url}/{self.model}:generateContent?key={self.api_key}"
+        url = f"{self.base_url}/{self.model}:generateContent"
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key,
+        }
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -221,7 +225,7 @@ class GeminiProvider(LLMProvider):
                 "responseSchema": PropertyAIAnalysis.model_json_schema(),
             },
         }
-        res = requests.post(url, json=payload, timeout=self.timeout)
+        res = requests.post(url, json=payload, headers=headers, timeout=self.timeout)
         res.raise_for_status()
         data = res.json()
         candidates = data.get("candidates") or []
@@ -234,11 +238,15 @@ class GeminiProvider(LLMProvider):
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY not configured")
 
-        url = f"{self.base_url}/{self.model}:generateContent?key={self.api_key}"
+        url = f"{self.base_url}/{self.model}:generateContent"
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key,
+        }
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
         }
-        res = requests.post(url, json=payload, timeout=self.timeout)
+        res = requests.post(url, json=payload, headers=headers, timeout=self.timeout)
         res.raise_for_status()
         data = res.json()
         candidates = data.get("candidates") or []
