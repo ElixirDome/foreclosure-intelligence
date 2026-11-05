@@ -4,12 +4,12 @@ from pathlib import Path
 Document, retrieval, extraction, and RAG API routes.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_llm_provider
-from app.services.llm import LocalLLMProvider
+from app.services.llm import GeminiProvider, LLMProvider, LocalLLMProvider
 from app.models import Document, DocumentChunk
 from app.schemas import (
     DocumentResponse,
@@ -202,13 +202,19 @@ def _rag_to_response(result) -> RAGResponse:
 @router.post("/rag", response_model=RAGResponse)
 def rag_answer(
     body: RAGRequest,
+    response: Response,
     db: Session = Depends(get_db),
-    provider: LocalLLMProvider = Depends(get_llm_provider),
+    provider: LLMProvider = Depends(get_llm_provider),
 ):
     """
     Unified Research Analyst & Multi-source RAG.
     Handles valuation explanation, status inquiries, discovery, onboarding, and multi-source RAG.
     """
+    provider_name = getattr(provider, "model", type(provider).__name__)
+    backend = "gemini" if isinstance(provider, GeminiProvider) else "ollama"
+    response.headers["x-llm-provider"] = str(provider_name)
+    response.headers["x-llm-backend"] = backend
+
     analyst_res = process_analyst_turn(
         db=db,
         question=body.question,
@@ -287,6 +293,7 @@ def rag_answer(
         chunks_used=len(citations),
         method=analyst_res.intent,
         mode=body.mode,
+        llm_provider=str(provider_name),
     )
 
 

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import logging
 import os
 import requests
 from dotenv import load_dotenv
@@ -6,6 +7,7 @@ from ollama import Client, ResponseError
 from app.schemas import PropertyAIAnalysis
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 def build_property_analysis_prompt(
     property_data: dict,
@@ -143,6 +145,7 @@ class LocalLLMProvider(LLMProvider):
             return False
 
     def generate(self, prompt: str) -> PropertyAIAnalysis:
+        logger.info("[LLM] Generating structured analysis using Ollama (model: %s)", self.model)
         try:
             response = self.client.chat(
                 model=self.model,
@@ -171,6 +174,7 @@ class LocalLLMProvider(LLMProvider):
 
     def generate_raw(self, prompt: str) -> str:
         """Generate unstructured markdown/text response for RAG or search planning."""
+        logger.info("[LLM] Generating synthesis using Ollama (model: %s)", self.model)
         try:
             response = self.client.chat(
                 model=self.model,
@@ -213,6 +217,7 @@ class GeminiProvider(LLMProvider):
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY not configured")
 
+        logger.info("[LLM] Generating structured analysis using Gemini (model: %s)", self.model)
         url = f"{self.base_url}/{self.model}:generateContent"
         headers = {
             "Content-Type": "application/json",
@@ -238,6 +243,7 @@ class GeminiProvider(LLMProvider):
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY not configured")
 
+        logger.info("[LLM] Generating synthesis using Gemini (model: %s)", self.model)
         url = f"{self.base_url}/{self.model}:generateContent"
         headers = {
             "Content-Type": "application/json",

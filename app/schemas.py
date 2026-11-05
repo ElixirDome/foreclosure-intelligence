@@ -356,6 +356,7 @@ class RAGResponse(BaseModel):
     chunks_used: int
     method: str
     mode: str
+    llm_provider: str | None = None
 
 
 class InvestmentAnalysisRequest(BaseModel):

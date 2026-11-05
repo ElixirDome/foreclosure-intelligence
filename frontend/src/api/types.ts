@@ -54,6 +54,7 @@ export interface RAGResponse {
   chunks_used: number;
   method: string;
   mode: string;
+  llm_provider?: string;
 }
 
 export interface EvidenceItem {

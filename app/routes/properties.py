@@ -3,7 +3,7 @@ import asyncio
 import json
 import time
 
-from fastapi import (APIRouter, Query, HTTPException, Request,
+from fastapi import (APIRouter, Query, HTTPException, Request, Response,
 Depends, status,
 File, UploadFile)
 from fastapi.responses import StreamingResponse
@@ -29,7 +29,7 @@ from app.security import (get_current_user, require_role,
                           require_property_owner, decode_access_token #
                           )
 from app.dependencies import get_llm_provider
-from app.services.llm import LLMProvider
+from app.services.llm import GeminiProvider, LLMProvider
 from app.services.properties import analyze_property_with_ai
 from app.services.live_events import broker, format_sse
 
@@ -179,9 +179,15 @@ def analyze_property_route(
 )
 def analyze_property_ai_route(
     property_id: int,
+    response: Response,
     db: Session = Depends(get_db),
     provider: LLMProvider = Depends(get_llm_provider),
 ):
+    provider_name = getattr(provider, "model", type(provider).__name__)
+    backend = "gemini" if isinstance(provider, GeminiProvider) else "ollama"
+    response.headers["x-llm-provider"] = str(provider_name)
+    response.headers["x-llm-backend"] = backend
+
     property = get_property_by_id(
         property_id=property_id,
         db=db,
