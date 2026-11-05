@@ -45,7 +45,7 @@ from app.schemas import (
     MarketComparableCreate,
     MarketComparableResponse,
 )
-from app.services.properties import get_property_summary;
+from app.services.properties import get_property_summary, delete_expired_properties;
 
 router = APIRouter(prefix="/properties",tags=["properties"])
 
@@ -607,3 +607,44 @@ def calculate_property_market_valuation(
             status_code=400,
             detail=str(exc),
         )
+
+
+@router.post(
+    "/cleanup-expired",
+    response_model=dict,
+    summary="Delete expired auction properties",
+)
+def cleanup_expired_properties_endpoint(
+    as_of_date: date | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Delete all properties whose auction date has expired.
+    Defaults to today's date if as_of_date is omitted.
+    """
+    deleted = delete_expired_properties(db, as_of_date=as_of_date)
+    return {
+        "status": "success",
+        "deleted_count": deleted,
+        "as_of_date": str(as_of_date or date.today()),
+    }
+
+
+@router.delete(
+    "/expired",
+    response_model=dict,
+    summary="Delete expired auction properties",
+)
+def delete_expired_properties_endpoint(
+    as_of_date: date | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Delete all properties whose auction date has expired.
+    """
+    deleted = delete_expired_properties(db, as_of_date=as_of_date)
+    return {
+        "status": "success",
+        "deleted_count": deleted,
+        "as_of_date": str(as_of_date or date.today()),
+    }

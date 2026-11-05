@@ -1,8 +1,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from math import ceil
-from datetime import date
-from app.models import Property, PropertyDocument, Document, PropertyValuation
+from datetime import date, datetime
+from app.models import Property, PropertyDocument, Document, PropertyValuation, Evidence
 
 from sqlalchemy import and_, case, func, or_, select
 
@@ -797,3 +797,51 @@ def get_property_summary(db: Session):
         "commercial": commercial,
         "sold": sold,
     }
+
+
+def delete_expired_properties(
+    db: Session,
+    as_of_date: date | None = None,
+) -> int:
+    """
+    Delete all properties whose auction date has expired (strictly before as_of_date, defaults to today).
+    Cascades deletion to dependent child records (PropertyDocument, PropertyValuation, Evidence)
+    to maintain relational integrity without leaving orphaned records.
+    Returns the count of deleted properties.
+    """
+    if as_of_date is None:
+        as_of_date = date.today()
+
+    expired_props = (
+        db.query(Property)
+        .filter(
+            or_(
+                and_(Property.auction_date.is_not(None), Property.auction_date < as_of_date),
+                and_(
+                    Property.auction_date.is_(None),
+                    Property.auction_end.is_not(None),
+                    Property.auction_end < datetime.combine(as_of_date, datetime.min.time()),
+                ),
+            )
+        )
+        .all()
+    )
+
+    if not expired_props:
+        return 0
+
+    expired_ids = [p.id for p in expired_props]
+
+    # Delete foreign key references in child tables
+    db.query(Evidence).filter(Evidence.property_id.in_(expired_ids)).delete(synchronize_session=False)
+    db.query(PropertyValuation).filter(PropertyValuation.property_id.in_(expired_ids)).delete(synchronize_session=False)
+    db.query(PropertyDocument).filter(PropertyDocument.property_id.in_(expired_ids)).delete(synchronize_session=False)
+
+    deleted_count = (
+        db.query(Property)
+        .filter(Property.id.in_(expired_ids))
+        .delete(synchronize_session=False)
+    )
+
+    db.commit()
+    return deleted_count

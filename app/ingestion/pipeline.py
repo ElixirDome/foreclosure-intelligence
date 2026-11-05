@@ -95,6 +95,8 @@ def run_ingestion(
     db: Session,
     adapter: SourceAdapter,
     user_id: int,
+    *,
+    purge_expired: bool = False,
 ):
     """
     Full property + document ingestion (backward compatible).
@@ -278,6 +280,12 @@ def run_ingestion(
                 err_msg += f" (and {len(failed_docs)} document failures)"
             ingestion_run.error_message = err_msg.strip()
         db.commit()
+
+        if purge_expired:
+            from app.services.properties import delete_expired_properties
+            purged = delete_expired_properties(db)
+            if purged > 0:
+                logger.info("Purged %d expired properties after ingestion run %d", purged, ingestion_run.id)
 
         broker.publish(
             "ingestion_status",

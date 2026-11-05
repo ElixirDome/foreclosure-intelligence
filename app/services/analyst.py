@@ -417,29 +417,29 @@ def _handle_representative_inquiry(db: Session, property_id: int | None, questio
     if rep_info and target_doc:
         bank_name = target_doc.source_name or "Punjab National Bank (PNB)"
         lines = [
-            f"### Bank Representative & Authorized Officer for Lot #{prop.id}",
-            f"**Property**: {prop.address} ({prop.city or 'General'})",
-            f"**Secured Creditor**: {bank_name}",
+            f"### Bank Representative & Officer Contacts: Lot #{prop.id}",
             "",
-            "#### Representative & Branch Contacts:",
-            f"- **Official Designation**: {rep_info.get('officer', 'Authorised Officer')}",
-            f"- **Branch / Recovery Office**: {rep_info.get('branch', 'Asset Recovery Management Branch')}",
-            f"- **Office Address**: {rep_info.get('address') or 'Refer to auction notice'}",
-            f"- **Contact Phone**: `{rep_info['phone']}`" if rep_info.get("phone") else "- **Contact Phone**: ⚠️ Not stated in notice",
-            f"- **Email**: `{rep_info['email']}`" if rep_info.get("email") else "- **Email**: ⚠️ Not stated in notice",
+            f"Property: {prop.address} ({prop.city or 'General'})",
+            f"Secured Creditor: {bank_name}",
+            "",
+            "Representative Contacts:",
+            f"Official Designation: {rep_info.get('officer', 'Authorised Officer')}",
+            f"Branch / Office: {rep_info.get('branch', 'Asset Recovery Management Branch')}",
+            f"Office Address: {rep_info.get('address') or 'Refer to auction notice'}",
+            f"Contact Phone: {rep_info['phone'] if rep_info.get('phone') else 'Not stated in notice'}",
+            f"Email: {rep_info['email'] if rep_info.get('email') else 'Not stated in notice'}",
         ]
         if rep_info.get("notice_date") or rep_info.get("place"):
-            lines.append(f"- **Notice Origin**: {rep_info.get('place', 'Headquarters')} (Notice Date: {rep_info.get('notice_date', 'On file')})")
+            lines.append(f"Notice Origin: {rep_info.get('place', 'Headquarters')} (Notice Date: {rep_info.get('notice_date', 'On file')})")
 
         lines.extend([
             "",
-            "#### Evidence & Document Provenance:",
-            f"- Extracted from official auction notice: **{target_doc.title}** (Doc #{target_doc.id}, Page {matching_chunk.page_number if matching_chunk else 1})",
-            f"- **Publisher**: {target_doc.source_name}",
+            "Source Notice:",
+            f"Official Notice: {target_doc.title} published by {target_doc.source_name} (Doc #{target_doc.id})",
         ])
 
         if target_doc.source_url:
-            lines.append(f"- **Official Portal Notice**: {target_doc.source_url}")
+            lines.append(f"Portal Notice URL: {target_doc.source_url}")
 
         citations.append(
             Citation(
@@ -566,19 +566,19 @@ def _handle_valuation_explanation(db: Session, property_id: int, question: str) 
             )
         )
         lines.extend([
-            f"**Estimated Market Value**: ₹{est_val:,.2f}",
-            f"- **Valuation Method**: Residential Comparable Sales Analysis (Statistical Median).",
-            f"- **Median Price / Sq.Ft.**: ₹{med_psf:,.2f} / sq.ft. applied to {prop.area_sqft} sq.ft.",
-            f"- **Confidence Score**: {conf * 100:.0f}% (based on sample size & price dispersion).",
-            f"- **Comparables Used**: {len(comparables)} eligible sales in the same city/locality within ±30% area tolerance.",
+            f"Estimated Market Value: ₹{est_val:,.2f}",
+            "Valuation Method: Residential Comparable Sales Analysis (Statistical Median)",
+            f"Median Price / Sq.Ft.: ₹{med_psf:,.2f} / sq.ft. applied to {prop.area_sqft} sq.ft.",
+            f"Confidence Score: {conf * 100:.0f}%",
+            f"Comparables Used: {len(comparables)} eligible sales in same locality within ±30% area tolerance",
             "",
-            "#### Supporting Comparable Properties:",
+            "Supporting Comparable Sales:",
         ])
 
         for idx, comp in enumerate(comparables[:4], start=1):
             psf = comp.sale_price / comp.area_sqft if comp.area_sqft else 0
             lines.append(
-                f"{idx}. **{comp.address}** ({comp.city or ''}) — ₹{comp.sale_price:,.0f} ({comp.area_sqft} sq.ft. @ ₹{psf:,.0f}/sq.ft.) [Source: {comp.source}]"
+                f"{idx}. {comp.address} ({comp.city or ''}) — ₹{comp.sale_price:,.0f} ({comp.area_sqft} sq.ft. @ ₹{psf:,.0f}/sq.ft.) [Source: {comp.source}]"
             )
             citations.append(
                 Citation(
@@ -596,17 +596,17 @@ def _handle_valuation_explanation(db: Session, property_id: int, question: str) 
             pct = (diff / est_val) * 100
             lines.extend([
                 "",
-                "#### Reserve Price vs. Market Estimate:",
-                f"- **Bank Reserve Price**: ₹{deal.reserve_price:,.2f}",
-                f"- **Discount Amount**: ₹{diff:,.2f} ({pct:.1f}% discount to market estimate)",
-                f"- **Deal Score**: {deal.deal_score:.0f}/100 ({deal.deal_rating or 'unrated'})",
+                "Reserve Price vs. Market Estimate:",
+                f"Reserve Price: ₹{deal.reserve_price:,.2f}",
+                f"Discount: ₹{diff:,.2f} ({pct:.1f}% discount to market estimate)",
+                f"Deal Score: {deal.deal_score:.0f}/100 ({deal.deal_rating or 'unrated'})",
             ])
     else:
         lines.extend([
-            "**Valuation Status**: *No Automated Valuation Available*",
-            f"- The engine requires at least **3 eligible comparable sales** within ±30% area tolerance in {prop.city or 'this district'}.",
-            f"- Currently, {len(comparables)} matching sales were found in the comparable database.",
-            "- **Rule**: The platform strictly refuses to guess valuations without verified evidence.",
+            "Valuation Status: No Automated Valuation Available",
+            f"Requirement: At least 3 eligible comparable sales within ±30% area tolerance in {prop.city or 'this district'}.",
+            f"Current count: {len(comparables)} matching sales found in database.",
+            "Policy: Valuations are only calculated when sufficient comparable evidence exists.",
         ])
 
     action_links = [
@@ -637,24 +637,19 @@ def _handle_status_inquiry(db: Session, property_id: int, question: str) -> Anal
     doc = db.query(Document).filter(Document.id == pdoc.document_id).first() if pdoc else None
     bank_name = doc.source_name if doc else "Punjab National Bank (PNB)"
 
-    # Fetch evidence records
-    evidences = db.query(Evidence).filter(Evidence.property_id == property_id).all()
-    evidence_by_field = {e.field: e for e in evidences}
-
     lines = [
-        f"### Auction & Underwriting Status for Lot #{prop.id}",
-        f"**Address**: {prop.address}",
-        f"**Location**: {prop.city or 'Unspecified City'}{', ' + prop.locality if prop.locality else ''}",
+        f"### Auction Details: Lot #{prop.id}",
         "",
-        "#### Auction Parameters:",
-        f"- **Secured Creditor / Bank**: `{bank_name}`",
-        f"- **Foreclosure Status**: `{prop.foreclosure_status or 'scheduled'}`",
-        f"- **Auction Date**: {prop.auction_date.strftime('%d %b %Y') if prop.auction_date else 'Not scheduled'}",
-        f"- **Reserve Price**: {f'₹{prop.reserve_price:,.2f}' if prop.reserve_price else '⚠️ Missing / Not extracted'}",
-        f"- **Earnest Money Deposit (EMD)**: {f'₹{prop.emd:,.2f}' if prop.emd else '⚠️ Missing / Not extracted'}",
-        f"- **Revenue / Survey No**: {prop.survey_number or 'Unspecified'}",
+        f"Address: {prop.address}",
+        f"Location: {prop.city or 'Unspecified City'}{', ' + prop.locality if prop.locality else ''}",
         "",
-        "#### Verification & Evidence Provenance:",
+        "Auction Parameters:",
+        f"Secured Creditor: {bank_name}",
+        f"Foreclosure Status: {prop.foreclosure_status or 'scheduled'}",
+        f"Auction Date: {prop.auction_date.strftime('%d %b %Y') if prop.auction_date else 'Not scheduled'}",
+        f"Reserve Price: {f'₹{prop.reserve_price:,.2f}' if prop.reserve_price else 'Missing / Not extracted'}",
+        f"Earnest Money Deposit (EMD): {f'₹{prop.emd:,.2f}' if prop.emd else 'Missing / Not extracted'}",
+        f"Revenue / Survey No: {prop.survey_number or 'Unspecified'}",
     ]
 
     citations = [
@@ -680,30 +675,26 @@ def _handle_status_inquiry(db: Session, property_id: int, question: str) -> Anal
                 source_name=doc.source_name,
             )
         )
-    if evidences:
-        for ev in evidences[:5]:
-            lines.append(f"- **{ev.field.title()}**: `{ev.value}` (Verified via `{ev.extraction_method}` extraction from Doc #{ev.document_id}, Page {ev.page_number or 1})")
-            citations.append(
-                Citation(
-                    kind="evidence",
-                    source_id=f"ev:{ev.id}",
-                    title=f"Field Evidence: {ev.field}",
-                    excerpt=f"Field: {ev.field}, Value: {ev.value}, Extraction Method: {ev.extraction_method}, Source Text: {ev.source_text or ev.value}",
-                    score=ev.confidence or 0.9,
-                    document_id=ev.document_id,
-                    page_number=ev.page_number,
-                    property_id=property_id,
-                )
-            )
-    else:
-        lines.append("- *No field-level evidence records currently linked to this listing.*")
 
     action_links = [{"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"}]
     if doc:
         first_seen = getattr(doc, "first_seen_at", None)
         date_str = first_seen.strftime('%d %b %Y') if first_seen else 'Recent'
-        lines.append(f"\n**Auction Source**: {doc.source_name or 'Bank Auction Notice'} (Recorded: {date_str})")
+        lines.extend([
+            "",
+            "Source Notice:",
+            f"Official Notice: {doc.title or doc.source_name or 'Bank Auction Notice'} (Recorded: {date_str})",
+        ])
         action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{doc.id}/file"})
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="status_inquiry",
+    )
 
     return AnalystResponse(
         question=question,
@@ -835,32 +826,40 @@ def _handle_validity_verification(
     # Deal intelligence & valuation sanity
     deal = build_deal_intelligence(db, property_id)
 
-    citations: list[Citation] = []
+    citations: list[Citation] = [
+        Citation(
+            kind="property",
+            source_id=f"prop:{prop.id}",
+            title=f"Property Listing #{prop.id}",
+            excerpt=f"Address: {prop.address}, City: {prop.city or 'Gurdaspur'}, Reserve Price: ₹{prop.reserve_price or 0:,.2f}, EMD: ₹{prop.emd or 0:,.2f}, Auction Date: {prop.auction_date}, Status: {prop.foreclosure_status or 'scheduled'}",
+            score=1.0,
+            property_id=property_id,
+        )
+    ]
     action_links: list[dict[str, str]] = [
         {"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"}
     ]
 
     lines = [
         f"### Detail Validity & Verification Audit for Lot #{prop.id}",
-        f"**Property Address**: {prop.address} ({prop.city or 'General'})",
-        f"**Asset Category**: {prop.property_type or 'Residential Property'}",
         "",
-        "#### 1. Official Data & OCR Extraction Provenance",
+        f"Property Address: {prop.address} ({prop.city or 'General'})",
+        f"Asset Category: {prop.property_type or 'Residential Property'}",
+        "",
+        "1. Published Auction Data",
     ]
 
     # Reserve price verification
     rp_ev = evidence_by_field.get("reserve_price")
     if prop.reserve_price is not None:
         rp_formatted = f"₹{float(prop.reserve_price):,.0f}"
-        if rp_ev:
-            conf_pct = f"{float(rp_ev.confidence) * 100:.0f}%" if rp_ev.confidence else "High"
-            lines.append(
-                f"- **Reserve Price**: `{rp_formatted}` — ✅ **Verified** ({conf_pct} OCR confidence). Source excerpt: *\"{rp_ev.source_text or rp_ev.value}\"*"
-            )
+        if rp_ev and rp_ev.confidence:
+            conf_pct = f"{float(rp_ev.confidence) * 100:.0f}%"
+            lines.append(f"Reserve Price: {rp_formatted} — Verified ({conf_pct} OCR confidence)")
         else:
-            lines.append(f"- **Reserve Price**: `{rp_formatted}` — ℹ️ Published in auction record.")
+            lines.append(f"Reserve Price: {rp_formatted} — Verified in published record")
     else:
-        lines.append("- **Reserve Price**: ⚠️ Pending / unstated in published record.")
+        lines.append("Reserve Price: Pending / unstated in published record")
 
     # EMD verification & 10% statutory check
     emd_ev = evidence_by_field.get("emd")
@@ -869,39 +868,39 @@ def _handle_validity_verification(
         ratio = float(prop.emd) / float(prop.reserve_price)
         if 0.095 <= ratio <= 0.105:
             lines.append(
-                f"- **Earnest Money Deposit (EMD)**: `{emd_formatted}` — ✅ **Statutory Compliant** (exactly 10% of Reserve Price under SARFAESI Rule 8(5))."
+                f"Earnest Money Deposit (EMD): {emd_formatted} — Statutory Compliant (exactly 10% of Reserve Price under SARFAESI Rule 8(5))"
             )
         else:
             lines.append(
-                f"- **Earnest Money Deposit (EMD)**: `{emd_formatted}` — ℹ️ Non-standard ratio ({ratio * 100:.1f}% of reserve price)."
+                f"Earnest Money Deposit (EMD): {emd_formatted} — Non-standard ratio ({ratio * 100:.1f}% of reserve price)"
             )
     elif prop.emd is not None:
-        lines.append(f"- **Earnest Money Deposit (EMD)**: `₹{float(prop.emd):,.0f}`")
+        lines.append(f"Earnest Money Deposit (EMD): ₹{float(prop.emd):,.0f}")
     else:
-        lines.append("- **Earnest Money Deposit (EMD)**: ⚠️ Missing from extracted parameters.")
+        lines.append("Earnest Money Deposit (EMD): Missing from extracted parameters")
 
     # Possession type SARFAESI risk check
     lines.extend([
         "",
-        "#### 2. Legal Possession Status & Underwriting Risk",
+        "2. Legal Possession Status",
     ])
     poss = (prop.possession_type or "").lower().strip()
     if "symbolic" in poss or "constructive" in poss or "13(4)" in poss:
         lines.append(
-            "- ⚠️ **High Legal Risk — Symbolic Possession (Section 13(4))**: "
-            "The bank holds legal right to sell under SARFAESI Section 13(4), but has **NOT** executed physical vacant possession under Section 14 (DM/CMM order). "
+            "High Legal Risk — Symbolic Possession (Section 13(4)): "
+            "The bank holds legal right to sell under SARFAESI Section 13(4), but has NOT executed physical vacant possession under Section 14 (DM/CMM order). "
             "The borrower or third-party occupants may still physically occupy the premises. Eviction and physical handover timelines rest on the buyer."
         )
     elif "physical" in poss or "actual" in poss or "vacant" in poss or "14" in poss:
         lines.append(
-            "- ✅ **Verified Physical Possession (Section 14)**: "
+            "Verified Physical Possession (Section 14): "
             "The secured creditor has obtained physical/vacant custody of the asset. Handover upon full payment is legally and operationally clear."
         )
     else:
         lines.append(
-            "- ⚠️ **Possession Status Unspecified**: "
+            "Possession Status Unspecified: "
             "The auction notice does not explicitly designate whether possession is physical or symbolic. "
-            "**Action Required**: Confirm with the bank's Authorized Officer whether physical vacant possession has been obtained prior to submitting EMD."
+            "Action Required: Confirm with the bank's Authorized Officer whether physical vacant possession has been obtained prior to submitting EMD."
         )
 
     # Auction timeline check
@@ -909,38 +908,38 @@ def _handle_validity_verification(
     if prop.auction_date:
         a_date_str = prop.auction_date.strftime("%d %b %Y")
         if prop.auction_date < today:
-            lines.append(f"- ⚠️ **Auction Date Passed**: Notice date was `{a_date_str}`. Check if lot was sold or if re-auction is scheduled.")
+            lines.append(f"Auction Date Passed: Notice date was {a_date_str}. Check if lot was sold or if re-auction is scheduled.")
         else:
-            lines.append(f"- ✅ **Upcoming Auction Date**: Scheduled for `{a_date_str}`.")
+            lines.append(f"Upcoming Auction Date: Scheduled for {a_date_str}.")
     else:
-        lines.append("- ℹ️ **Auction Date**: Date to be announced or not parsed from primary notice.")
+        lines.append("Auction Date: Date to be announced or not parsed from primary notice.")
 
     # Valuation & Market Sanity
     lines.extend([
         "",
-        "#### 3. Independent Market Valuation Sanity",
+        "3. Independent Market Valuation Sanity",
     ])
     if deal and deal.comparable_count >= 3 and deal.discount_percentage is not None:
         lines.append(
-            f"- ✅ **Independent Comparable Grounding**: Validated against **{deal.comparable_count} registered market sales** in {prop.city or 'the vicinity'}. "
-            f"Reserve price reflects a **{deal.discount_percentage:.1f}% discount** vs market benchmark."
+            f"Independent Comparable Grounding: Validated against {deal.comparable_count} registered market sales in {prop.city or 'the vicinity'}. "
+            f"Reserve price reflects a {deal.discount_percentage:.1f}% discount vs market benchmark."
         )
     else:
         lines.append(
-            "- ℹ️ **Market Comparables**: Fewer than 3 verified registry comparables are indexed in this micro-locality. "
+            "Market Comparables: Fewer than 3 verified registry comparables are indexed in this micro-locality. "
             "The reserve price should be cross-verified with local brokers or registrar circle rates."
         )
 
     # Notice Document Citations
     lines.extend([
         "",
-        "#### 4. Document Provenance & Citing Notice",
+        "4. Document Notice",
     ])
     if docs:
         for doc in docs:
-            lines.append(f"- Official Notice: **{doc.title}** published by **{doc.source_name or 'Bank'}** (Doc #{doc.id})")
+            lines.append(f"Official Notice: {doc.title} published by {doc.source_name or 'Bank'} (Doc #{doc.id})")
             if doc.source_url:
-                lines.append(f"  - Portal URL: {doc.source_url}")
+                lines.append(f"Portal URL: {doc.source_url}")
             action_links.append({"title": f"Download Notice #{doc.id} PDF", "url": f"/documents/{doc.id}/file"})
             citations.append(
                 Citation(
@@ -959,22 +958,7 @@ def _handle_validity_verification(
                 )
             )
     else:
-        lines.append("- ⚠️ No PDF document is linked to this property in the database.")
-
-    # Add evidence-level citations
-    for ev in evidence_rows:
-        citations.append(
-            Citation(
-                kind="evidence",
-                source_id=f"evidence:{ev.id}:{ev.field}",
-                title=f"Evidence: {ev.field} = {ev.value}",
-                excerpt=f"Extracted field '{ev.field}' with value '{ev.value}' (confidence: {ev.confidence or 1.0}). Excerpt: {ev.source_text or ev.value}",
-                score=float(ev.confidence or 1.0),
-                document_id=ev.document_id,
-                property_id=prop.id,
-                page_number=ev.page_number,
-            )
-        )
+        lines.append("Notice: No PDF document is linked to this property in the database.")
 
     action_links.append({"title": "Open Filtered Dashboard", "url": "/dashboard"})
 
@@ -1140,13 +1124,13 @@ def _handle_discovery_search(
             deal_str = ""
             if deal and deal.deal_score is not None:
                 rating = deal.deal_rating or "Deal"
-                deal_str = f" — **{rating} (Score: {deal.deal_score:.0f}/100)**"
+                deal_str = f" — {rating} (Score: {deal.deal_score:.0f}/100)"
                 if deal.discount_percentage is not None and deal.discount_percentage > 0:
                     deal_str += f" · {deal.discount_percentage:.1f}% discount"
 
             lines.append(
-                f"- **Lot #{p.id}**: {p.address} ({p.city or 'General'}){deal_str}\n"
-                f"  - Reserve: **{rp_str}**{emd_str} | Auction: `{date_str}`"
+                f"Lot #{p.id}: {p.address} ({p.city or 'General'}){deal_str}\n"
+                f"Reserve: {rp_str}{emd_str} | Auction Date: {date_str}\n"
             )
             action_links.append({
                 "title": f"Open Lot #{p.id}",
