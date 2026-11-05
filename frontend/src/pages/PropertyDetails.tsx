@@ -88,7 +88,7 @@ function PropertyDetails() {
   const [property, setProperty] = useState<Property | null>(null);
   const [analysis, setAnalysis] = useState<PropertyAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
-  const [analysisLoading, setAnalysisLoading] = useState(true);
+  const [, setAnalysisLoading] = useState(true);
   const [error, setError] = useState("");
 
   const [marketValuation, setMarketValuation] = useState<{
@@ -105,8 +105,8 @@ function PropertyDetails() {
   const [investmentError, setInvestmentError] = useState("");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(true);
-  const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
-  const [dealIntel, setDealIntel] = useState<DealIntelligence | null>(null);
+  const [, setEvidence] = useState<EvidenceItem[]>([]);
+  const [, setDealIntel] = useState<DealIntelligence | null>(null);
 
   const [favorites, setFavorites] = useState<number[]>(() => {
     try {
@@ -364,6 +364,14 @@ function PropertyDetails() {
     );
   }
 
+  const listingWebsiteUrl =
+    property?.listing_url ||
+    documents?.find((d) => d.source_url)?.source_url ||
+    (property as any)?.source_url ||
+    property?.extra_data?.listingUrl ||
+    property?.extra_data?.source_url ||
+    property?.extra_data?.detailUrl;
+
   return (
     <div className="page">
       <div className="navbar" style={{ justifyContent: "space-between" }}>
@@ -432,12 +440,12 @@ function PropertyDetails() {
         <div className="bn-detail-kpi-ribbon">
           <div className="bn-detail-kpi-item">
             <span>Reserve Price</span>
-            <strong style={{ color: "#0b1f3a" }}>{formatINR(property.reserve_price)}</strong>
+            <strong>{formatINR(property.reserve_price)}</strong>
           </div>
 
           <div className="bn-detail-kpi-item">
             <span>EMD (10%)</span>
-            <strong style={{ color: "#1d4ed8" }}>{formatINR(property.emd)}</strong>
+            <strong>{formatINR(property.emd)}</strong>
           </div>
 
           <div className="bn-detail-kpi-item">
@@ -451,7 +459,7 @@ function PropertyDetails() {
           </div>
         </div>
 
-        <section className="analysis-subcard" style={{ margin: "18px 0" }}>
+        <section className="official-particulars-section">
           <h3>Official auction particulars</h3>
           <div className="info-grid">
             <div><strong>Bank</strong><span>{property.bank_name || "Not disclosed"}</span></div>
@@ -474,289 +482,180 @@ function PropertyDetails() {
             <div><strong>Type of action</strong><span>{String(property.extra_data?.typeOfAction ?? "Not specified")}</span></div>
             <div><strong>Branch address</strong><span>{String(property.extra_data?.branchAddress ?? "Not provided")}</span></div>
           </div>
-          {property.listing_url && <p><a href={property.listing_url} target="_blank" rel="noreferrer">Open original bank listing ↗</a></p>}
+          {listingWebsiteUrl && (
+            <div style={{ marginTop: 20 }}>
+              <a
+                href={listingWebsiteUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "10px 18px",
+                  borderRadius: 8,
+                  background: "var(--accent-primary, #2563eb)",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: 14,
+                  textDecoration: "none",
+                }}
+              >
+                🌐 Open Bank Listing Website ↗
+              </a>
+            </div>
+          )}
         </section>
-      </div>
 
-      <div className="deal-analysis-unified analysis-container">
-        <h2>Deal Analysis</h2>
-        <section className="analysis-subcard">
-          <h3>Deal intelligence</h3>
-
-        {analysisLoading && <p>Calculating analysis...</p>}
-
-        {!analysisLoading && analysis && (
-          <div className="analysis-grid">
-            <div className="analysis-card">
-              <strong>Estimated market value</strong>
-              <span>
-                ₹
-                {analysis.estimated_value?.toLocaleString(
-                  "en-IN"
-                ) ?? "N/A"}
-              </span>
-            </div>
-
-            <div className="analysis-card">
-              <strong>Valuation confidence</strong>
-              <span>
-                {analysis.valuation_confidence != null
-                  ? `${(analysis.valuation_confidence * 100).toFixed(0)}%`
-                  : "N/A"}
-              </span>
-            </div>
-
-            <div className="analysis-card">
-              <strong>Reserve price</strong>
-              <span>{analysis.reserve_price != null ? formatINR(analysis.reserve_price) : "N/A"}</span>
-            </div>
-
-            <div className="analysis-card">
-              <strong>EMD</strong>
-              <span>{analysis.emd != null ? formatINR(analysis.emd) : "N/A"}</span>
-            </div>
-
-            <div className="analysis-card">
-              <strong>Discount</strong>
-              <span>
-                {analysis.discount_percentage !== null
-                  ? `${analysis.discount_percentage}%`
-                  : "N/A"}
-              </span>
-            </div>
-
-            <div className="analysis-card">
-              <strong>Discount amount</strong>
-              <span>
-                ₹
-                {analysis.discount_amount?.toLocaleString(
-                  "en-IN"
-                ) ?? "N/A"}
-              </span>
-            </div>
-
-            <div className="analysis-card">
-              <strong>Deal rating</strong>
-              <span>
-                {analysis.deal_rating ?? "N/A"}
-              </span>
-            </div>
-
-            <div className="analysis-card">
-              <strong>Deal score</strong>
-              <span>
-                {analysis.deal_score ?? "N/A"}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {!analysisLoading && !analysis && (
-          <p>Analysis unavailable.</p>
-        )}
-      {dealIntel && (
-        <div className="deal-intel-signals">
-          <h4>Additional signals</h4>
-          <div className="analysis-grid">
-            <div className="analysis-card">
-              <strong>Comparables</strong>
-              <span>{dealIntel.comparable_count}</span>
-            </div>
-          </div>
-          {dealIntel.factors?.length > 0 && (
-            <ul className="factor-list">
-              {dealIntel.factors.map((f, i) => (
-                <li key={i} className={f.direction === "+" ? "pos" : f.direction === "-" ? "neg" : ""}>
-                  {f.direction} {f.label}
-                </li>
-              ))}
+        <section className="official-documents-section">
+          <h3>Official auction documents</h3>
+          {documentsLoading && <p className="muted">Loading documents…</p>}
+          {!documentsLoading && documents.length === 0 && (
+            <p className="muted">
+              No documents linked to this property yet. Import a sale notice or run
+              ingestion to attach PDFs.
+            </p>
+          )}
+          {!documentsLoading && documents.length > 0 && (
+            <ul className="document-list">
+              {documents.map((doc) => {
+                const isPdf =
+                  (doc.mime_type && doc.mime_type.includes("pdf")) ||
+                  (doc.filename && doc.filename.toLowerCase().endsWith(".pdf")) ||
+                  (doc.source_url && doc.source_url.toLowerCase().includes(".pdf"));
+                const fileHref = `${api.defaults.baseURL}/documents/${doc.id}/file`;
+                const pdfHref =
+                  isPdf && doc.source_url && doc.source_url.toLowerCase().includes(".pdf")
+                    ? doc.source_url
+                    : isPdf
+                      ? fileHref
+                      : null;
+                const directSourceLink = listingWebsiteUrl || doc.source_url;
+                return (
+                  <li key={doc.id} className="document-row">
+                    <div>
+                      <strong>
+                        {doc.title || doc.filename || doc.document_type}
+                      </strong>
+                      <div className="muted tiny">
+                        {doc.source_name}
+                        {doc.document_type ? ` · ${doc.document_type}` : ""}
+                        {doc.filename ? ` · ${doc.filename}` : ""}
+                      </div>
+                    </div>
+                    <div className="document-actions">
+                      {pdfHref && (
+                        <a
+                          className="doc-btn"
+                          href={pdfHref}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open PDF
+                        </a>
+                      )}
+                      {directSourceLink && (
+                        <a
+                          className="doc-btn secondary"
+                          href={directSourceLink}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Source link ↗
+                        </a>
+                      )}
+                      {!pdfHref && !directSourceLink && (
+                        <a className="doc-btn secondary" href={fileHref} target="_blank" rel="noreferrer">
+                          Open
+                        </a>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
-          {dealIntel.explanation && (
-            <pre className="answer-text">{dealIntel.explanation}</pre>
+        </section>
+      </div>
+
+      <div className="property-valuation-container analysis-container">
+        <div className="valuation-tool-card" style={{ marginBottom: 24 }}>
+          <h3>Market valuation</h3>
+
+          <p className="muted">
+            Estimate the property's market value using the comparable
+            sales already stored in the system.
+          </p>
+
+          <button
+            onClick={handleMarketValuation}
+            disabled={marketValuationLoading}
+          >
+            {marketValuationLoading
+              ? "Calculating..."
+              : "Calculate market valuation"}
+          </button>
+
+          {marketValuationError && (
+            <p className="error">{marketValuationError}</p>
+          )}
+
+          {marketValuation && (
+            <div className="analysis-grid" style={{ marginTop: 16 }}>
+              <div className="analysis-card">
+                <strong>Estimated market value</strong>
+                <span>
+                  {formatINR(marketValuation.estimated_value)}
+                </span>
+              </div>
+
+              <div className="analysis-card">
+                <strong>Method</strong>
+                <span>{marketValuation.valuation_method}</span>
+              </div>
+
+              <div className="analysis-card">
+                <strong>Confidence</strong>
+                <span>
+                  {marketValuation.confidence !== null
+                    ? `${(marketValuation.confidence * 100).toFixed(0)}%`
+                    : "N/A"}
+                </span>
+              </div>
+            </div>
           )}
         </div>
-      )}
 
-      
-
-        </section>
-
-      <div className="analysis-subcard">
-        <h3>Market valuation</h3>
-
-        <p>
-          Estimate the property's market value using the comparable
-          sales already stored in the system.
-        </p>
-
-        <button
-          onClick={handleMarketValuation}
-          disabled={marketValuationLoading}
-        >
-          {marketValuationLoading
-            ? "Calculating..."
-            : "Calculate market valuation"}
-        </button>
-
-        {marketValuationError && (
-          <p className="error">{marketValuationError}</p>
-        )}
-
-        {marketValuation && (
-          <div className="analysis-grid">
-            <div className="analysis-card">
-              <strong>Estimated market value</strong>
-              <span>
-                {formatINR(marketValuation.estimated_value)}
-              </span>
-            </div>
-
-            <div className="analysis-card">
-              <strong>Method</strong>
-              <span>{marketValuation.valuation_method}</span>
-            </div>
-
-            <div className="analysis-card">
-              <strong>Confidence</strong>
-              <span>
-                {marketValuation.confidence !== null
-                  ? `${(marketValuation.confidence * 100).toFixed(0)}%`
-                  : "N/A"}
-              </span>
-            </div>
+        <div className="investment-tool-card">
+          <div className="section-header-row">
+            <h3>Is this worth a closer look?</h3>
+            <button
+              onClick={handleInvestmentAnalysis}
+              disabled={investmentLoading}
+            >
+              {investmentLoading ? "Looking at the file…" : "Write investment note"}
+            </button>
+            <button
+              type="button"
+              className="desk-btn-primary"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, fontSize: 13 }}
+              onClick={() => openAnalyst(Number(id), property?.address, "Is this property a good foreclosure investment?")}
+            >
+              🤖 Open Contextual Research Analyst
+            </button>
           </div>
-        )}
-      </div>
-      <div className="analysis-subcard">
-        <div className="section-header-row">
-          <h3>Is this worth a closer look?</h3>
-          <button
-            onClick={handleInvestmentAnalysis}
-            disabled={investmentLoading}
-          >
-            {investmentLoading ? "Looking at the file…" : "Write investment note"}
-          </button>
-          <button
-            type="button"
-            className="desk-btn-primary"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, fontSize: 13 }}
-            onClick={() => openAnalyst(Number(id), property?.address, "Is this property a good foreclosure investment?")}
-          >
-            🤖 Open Contextual Research Analyst
-          </button>
+          <p className="muted">
+            Uses the notice, property details, and valuation comparables stored for this lot.
+          </p>
+          {investmentError && <p className="error">{investmentError}</p>}
+          {investmentResult && <RagResult result={investmentResult} />}
+          {!investmentResult && !investmentLoading && (
+            <p className="muted">
+              Generate a short note, or use the corner research chat with the same
+              questions.
+            </p>
+          )}
         </div>
-        <p className="muted">
-          Uses the notice, evidence, comparables, and valuations already stored
-          for this lot. Supporting excerpts stay under View evidence.
-        </p>
-        {investmentError && <p className="error">{investmentError}</p>}
-        {investmentResult && <RagResult result={investmentResult} />}
-        {!investmentResult && !investmentLoading && (
-          <p className="muted">
-            Generate a short note, or use the corner research chat with the same
-            questions.
-          </p>
-        )}
-      </div>
-
-      <section className="analysis-subcard">
-        <h3>Source evidence</h3>
-        <h4>Source documents</h4>
-        {documentsLoading && <p className="muted">Loading documents…</p>}
-        {!documentsLoading && documents.length === 0 && (
-          <p className="muted">
-            No documents linked to this property yet. Import a sale notice or run
-            ingestion to attach PDFs.
-          </p>
-        )}
-        {!documentsLoading && documents.length > 0 && (
-          <ul className="document-list">
-            {documents.map((doc) => {
-              const isPdf =
-                (doc.mime_type && doc.mime_type.includes("pdf")) ||
-                (doc.filename && doc.filename.toLowerCase().endsWith(".pdf")) ||
-                (doc.source_url && doc.source_url.toLowerCase().includes(".pdf"));
-              const fileHref = `${api.defaults.baseURL}/documents/${doc.id}/file`;
-              const pdfHref =
-                isPdf && doc.source_url && doc.source_url.toLowerCase().includes(".pdf")
-                  ? doc.source_url
-                  : isPdf
-                    ? fileHref
-                    : null;
-              return (
-                <li key={doc.id} className="document-row">
-                  <div>
-                    <strong>
-                      {doc.title || doc.filename || doc.document_type}
-                    </strong>
-                    <div className="muted tiny">
-                      {doc.source_name}
-                      {doc.document_type ? ` · ${doc.document_type}` : ""}
-                      {doc.filename ? ` · ${doc.filename}` : ""}
-                    </div>
-                  </div>
-                  <div className="document-actions">
-                    {pdfHref && (
-                      <a
-                        className="doc-btn"
-                        href={pdfHref}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Open PDF
-                      </a>
-                    )}
-                    {doc.source_url && (
-                      <a
-                        className="doc-btn secondary"
-                        href={doc.source_url}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Source link
-                      </a>
-                    )}
-                    {!pdfHref && !doc.source_url && (
-                      <a className="doc-btn secondary" href={fileHref} target="_blank" rel="noreferrer">
-                        Open
-                      </a>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-      {/* Field-level evidence */}
-      <div className="source-evidence-content">
-        <h4>Extracted facts</h4>
-        {evidence.length === 0 && (
-          <p className="muted">No field-level evidence linked yet.</p>
-        )}
-        {evidence.length > 0 && (
-          <div className="citation-list">
-            {evidence.map((e) => (
-              <div className="citation-card" key={e.id}>
-                <div className="citation-head">
-                  <span className="badge badge-ev">{e.field}</span>
-                  <span className="citation-title">{e.value}</span>
-                  <span className="muted">
-                    doc #{e.document_id}
-                    {e.page_number != null ? ` · p.${e.page_number}` : ""}
-                    {e.extraction_method ? ` · ${e.extraction_method}` : ""}
-                  </span>
-                </div>
-                {e.source_text && (
-                  <p className="citation-excerpt">{e.source_text}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      </section>
       </div>
 
     </div>

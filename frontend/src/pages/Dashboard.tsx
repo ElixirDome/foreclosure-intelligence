@@ -907,7 +907,12 @@ function Dashboard() {
               const isFavorited = favorites.includes(property.id);
               const isNewlyAdded = justAddedIds.includes(property.id);
               const image = property.property_images?.[0];
-              const officialUrl = property.listing_url || property.sources?.find((source) => source.source_url)?.source_url;
+              const officialUrl =
+                property.listing_url ||
+                property.sources?.find((source) => source.source_url)?.source_url ||
+                (property as any)?.extra_data?.listingUrl ||
+                (property as any)?.extra_data?.source_url ||
+                (property as any)?.extra_data?.detailUrl;
               const money = (value: number | null | undefined) => value == null ? "Not disclosed" : `₹${Number(value).toLocaleString("en-IN")}`;
               const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleString("en-IN", { dateStyle: "medium", ...(value.includes("T") ? { timeStyle: "short" as const } : {}) }) : "Not specified";
               return (
@@ -919,27 +924,27 @@ function Dashboard() {
                     {isNewlyAdded && <span style={{ position: "absolute", bottom: 10, left: 12, background: "#166534", color: "#fff", padding: "4px 8px", borderRadius: 5, fontSize: 11 }}>JUST ADDED</span>}
                   </div>
                   <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
-                    <div><div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 700 }}>{bankName}{property.branch_name ? ` · ${property.branch_name}` : ""}</div><h3 style={{ fontSize: 17, lineHeight: 1.35, margin: "5px 0" }}>{property.address}</h3></div>
+                    <div><div style={{ fontSize: 12, color: "var(--accent-primary, #38bdf8)", fontWeight: 700 }}>{bankName}{property.branch_name ? ` · ${property.branch_name}` : ""}</div><h3 style={{ fontSize: 17, lineHeight: 1.35, margin: "5px 0" }}>{property.address}</h3></div>
                     <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>📍 {locationText || "Location details not provided"}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: 12, borderRadius: 9, background: "var(--bg-input)" }}>
-                      <div><div style={{ color: "var(--text-muted)", fontSize: 11 }}>RESERVE PRICE</div><strong style={{ fontSize: 18 }}>{money(property.reserve_price)}</strong></div>
-                      <div><div style={{ color: "var(--text-muted)", fontSize: 11 }}>EMD</div><strong>{money(property.emd)}</strong></div>
+                      <div><div className="field-label" style={{ fontSize: 11 }}>RESERVE PRICE</div><strong style={{ fontSize: 18 }}>{money(property.reserve_price)}</strong></div>
+                      <div><div className="field-label" style={{ fontSize: 11 }}>EMD</div><strong>{money(property.emd)}</strong></div>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "9px 12px", fontSize: 13 }}>
-                      <div><span style={{ color: "var(--text-muted)" }}>Property type</span><div>{property.property_type || "Not specified"}</div></div>
-                      <div><span style={{ color: "var(--text-muted)" }}>Area</span><div>{property.area_sqft ? `${property.area_sqft.toLocaleString("en-IN")} sq ft` : "As per notice"}</div></div>
-                      <div><span style={{ color: "var(--text-muted)" }}>Possession</span><div>{property.possession_type || "Not specified"}</div></div>
-                      <div><span style={{ color: "var(--text-muted)" }}>Property ID</span><div>{property.property_unique_id || property.auction_id || `#${property.id}`}</div></div>
-                      <div><span style={{ color: "var(--text-muted)" }}>Auction starts</span><div>{dateLabel(property.auction_start || property.auction_date)}</div></div>
-                      <div><span style={{ color: "var(--text-muted)" }}>Auction ends</span><div>{dateLabel(property.auction_end)}</div></div>
-                      <div><span style={{ color: "var(--text-muted)" }}>EMD deadline</span><div>{dateLabel(property.emd_deadline)}</div></div>
-                      <div><span style={{ color: "var(--text-muted)" }}>Inspection</span><div>{property.inspection_start || property.inspection_end ? `${dateLabel(property.inspection_start)} – ${dateLabel(property.inspection_end)}` : "Not specified"}</div></div>
+                      <div><span className="field-label" style={{ fontSize: 11 }}>Property type</span><div style={{ fontWeight: 500 }}>{property.property_type || "Not specified"}</div></div>
+                      <div><span className="field-label" style={{ fontSize: 11 }}>Area</span><div style={{ fontWeight: 500 }}>{property.area_sqft ? `${property.area_sqft.toLocaleString("en-IN")} sq ft` : "As per notice"}</div></div>
+                      <div><span className="field-label" style={{ fontSize: 11 }}>Possession</span><div style={{ fontWeight: 500 }}>{property.possession_type || "Not specified"}</div></div>
+                      <div><span className="field-label" style={{ fontSize: 11 }}>Property ID</span><div style={{ fontWeight: 500 }}>{property.property_unique_id || property.auction_id || `#${property.id}`}</div></div>
+                      <div><span className="field-label" style={{ fontSize: 11 }}>Auction starts</span><div style={{ fontWeight: 500 }}>{dateLabel(property.auction_start || property.auction_date)}</div></div>
+                      <div><span className="field-label" style={{ fontSize: 11 }}>Auction ends</span><div style={{ fontWeight: 500 }}>{dateLabel(property.auction_end)}</div></div>
+                      <div><span className="field-label" style={{ fontSize: 11 }}>EMD deadline</span><div style={{ fontWeight: 500 }}>{dateLabel(property.emd_deadline)}</div></div>
+                      <div><span className="field-label" style={{ fontSize: 11 }}>Inspection</span><div style={{ fontWeight: 500 }}>{property.inspection_start || property.inspection_end ? `${dateLabel(property.inspection_start)} – ${dateLabel(property.inspection_end)}` : "Not specified"}</div></div>
                     </div>
                     {property.discount_percentage != null && <div style={{ color: "var(--accent-emerald)", fontSize: 13, fontWeight: 700 }}>Estimated {property.discount_percentage.toFixed(0)}% below comparable market value</div>}
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: "auto", paddingTop: 8 }}>
                       <Link to={`/properties/${property.id}`} style={{ flex: 1, minWidth: 130, textAlign: "center", textDecoration: "none", padding: "10px 12px", borderRadius: 7, background: "var(--accent-primary, #2563eb)", color: "#fff", fontWeight: 700, fontSize: 13 }}>View property</Link>
                       <button type="button" onClick={() => openAnalyst(property.id, property.address)} style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid var(--border-subtle)", background: "transparent", color: "var(--text-primary)", cursor: "pointer" }}>Ask analyst</button>
-                      {officialUrl && <a href={officialUrl} target="_blank" rel="noreferrer" style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid var(--border-subtle)", color: "var(--text-primary)", textDecoration: "none", fontSize: 13 }}>Official notice ↗</a>}
+                      {officialUrl && <a href={officialUrl} target="_blank" rel="noreferrer" style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid var(--border-subtle)", color: "var(--accent-primary, #38bdf8)", textDecoration: "none", fontSize: 13, fontWeight: 600 }}>Source listing ↗</a>}
                     </div>
                     {property.estimated_value != null && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Our estimated market value: {money(property.estimated_value)} · Not a bank-verified figure</div>}
                   </div>
