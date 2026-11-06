@@ -158,18 +158,6 @@ def analyze_property_route(
     )
 
     analysis = analyze_property(property)
-    if analysis["estimated_value"] is None or analysis["estimated_value"] <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Deal analysis requires an automated comparable-based valuation",
-        )
-
-    if analysis["reserve_price"] is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Deal analysis requires reserve_price",
-        )
-
     cache.set(cache_key, analysis, ttl=60.0)
     return analysis
 
@@ -581,32 +569,11 @@ def calculate_property_market_valuation(
     property_obj: Property = Depends(require_property_owner),
     db: Session = Depends(get_db),
 ):
-
-    try:
-        valuation_result = calculate_market_valuation(
-            db=db,
-            property_obj=property_obj,
-        )
-
-        valuation = record_valuation(
-            db=db,
-            property_id=property_obj.id,
-            estimated_value=valuation_result["estimated_value"],
-            valuation_method=valuation_result["valuation_method"],
-            source="market_comparables",
-            confidence=valuation_result["confidence"],
-        )
-
-        return {
-            **valuation_result,
-            "valuation_id": valuation.id,
-        }
-
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc),
-        )
+    valuation_result = calculate_market_valuation(
+        db=db,
+        property_obj=property_obj,
+    )
+    return valuation_result
 
 
 @router.post(

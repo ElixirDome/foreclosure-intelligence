@@ -38,7 +38,6 @@ export default function ChatBot() {
     openAnalyst,
     closeAnalyst,
     activePropertyId,
-    activePropertyAddress,
     clearPropertyScope,
     consumePendingPrompt,
   } = useAnalyst();

@@ -33,6 +33,15 @@ def property_deal_intelligence(
 
     return DealIntelligenceResponse(
         property_id=result.property_id,
+        assessment_label=result.assessment_label,
+        reserve_price=result.reserve_price,
+        emd=result.emd,
+        emd_percentage=result.emd_percentage,
+        property_area=result.property_area,
+        reserve_price_per_sqft=result.reserve_price_per_sqft,
+        disclosed_outstanding_dues=result.disclosed_outstanding_dues,
+        possession_type=result.possession_type,
+        auction_status=result.auction_status,
         deal_score=result.deal_score,
         deal_rating=result.deal_rating,
         discount_amount=result.discount_amount,
@@ -42,8 +51,6 @@ def property_deal_intelligence(
         estimated_value=result.estimated_value,
         opening_bid=result.opening_bid,
         comparable_count=result.comparable_count,
-        reserve_price=result.reserve_price,
-        emd=result.emd,
         factors=[
             DealFactorResponse(
                 direction=f.direction,
@@ -53,6 +60,7 @@ def property_deal_intelligence(
             for f in result.factors
         ],
         explanation=result.explanation,
+        market_valuation_status=result.market_valuation_status,
     )
 
 

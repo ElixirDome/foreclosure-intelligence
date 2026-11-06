@@ -12,14 +12,15 @@ def test_build_property_analysis_prompt():
         "area_sqft": 1500,
         "auction_date": "2026-08-22",
         "foreclosure_status": "active",
-        "opening_bid": 60000,
-        "estimated_value": 90000,
+        "reserve_price": 60000,
+        "emd": 6000,
     }
 
     analysis_data = {
-        "discount_percentage": 33.33,
-        "risk_level": 2,
-        "deal_score": 23.33,
+        "assessment_label": "Further investigation required",
+        "emd_percentage": 10.0,
+        "reserve_price_per_sqft": 40.0,
+        "possession_type": "symbolic",
     }
 
     prompt = build_property_analysis_prompt(
@@ -28,10 +29,10 @@ def test_build_property_analysis_prompt():
     )
 
     assert "123 Main Street" in prompt
-    assert "90000" in prompt
     assert "60000" in prompt
-    assert "33.33" in prompt
-    assert "23.33" in prompt
+    assert "6000" in prompt
+    assert "Further investigation required" in prompt
+    assert "10.0" in prompt
 
 def test_local_llm_provider_initializes():
     provider = LocalLLMProvider()

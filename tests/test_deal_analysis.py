@@ -1,146 +1,163 @@
 """
-Unit tests for app.domain.deal_analysis.
-Pure business rules: discount, deal score, risk level, confidence adjustment, and ratings.
-No database or external network access required.
+Unit tests for deterministic financial calculations and transparent auction assessments.
+Verifies EMD percentage, reserve price per square foot, and deterministic assessment labels.
+No arbitrary numerical deal scores or unverified AVM discounts.
 """
 
 import pytest
-from app.domain.deal_analysis import (
-    DEAL_SCORE_RISK_MULTIPLIER,
-    FORECLOSURE_RISK_LEVELS,
-    calculate_confidence_adjusted_score,
-    calculate_deal_rating,
-    calculate_deal_score,
-    calculate_discount,
-    calculate_price_per_sqft,
-    get_risk_level,
+from app.domain.auction_intelligence import (
+    LABEL_FURTHER_INVESTIGATION,
+    LABEL_IMPORTANT_RISKS,
+    LABEL_INSUFFICIENT_INFO,
+    LABEL_NO_MAJOR_CONCERNS,
+    MARKET_VALUATION_UNAVAILABLE_MESSAGE,
+    AuctionAssessment,
+    AuctionIntelligenceDetails,
+    FinancialIntelligence,
+    PropertyLegalIntelligence,
+    calculate_emd_percentage,
+    calculate_reserve_price_per_sqft,
+    evaluate_auction_assessment,
 )
 
 
 @pytest.mark.unit
-class TestCalculateDiscount:
-    def test_standard_discount(self):
-        estimated_value = 5_000_000.0
-        opening_bid = 3_500_000.0
-        amount, pct = calculate_discount(estimated_value, opening_bid)
-        assert amount == pytest.approx(1_500_000.0)
-        assert pct == pytest.approx(30.0)
+class TestCalculateEMDPercentage:
+    def test_standard_statutory_ten_percent(self):
+        emd_pct = calculate_emd_percentage(emd=500_000, reserve_price=5_000_000)
+        assert emd_pct == pytest.approx(10.0)
 
-    def test_negative_discount_overbid(self):
-        estimated_value = 4_000_000.0
-        opening_bid = 5_000_000.0
-        amount, pct = calculate_discount(estimated_value, opening_bid)
-        assert amount == pytest.approx(-1_000_000.0)
-        assert pct == pytest.approx(-25.0)
+    def test_non_standard_emd_percentage(self):
+        emd_pct = calculate_emd_percentage(emd=750_000, reserve_price=5_000_000)
+        assert emd_pct == pytest.approx(15.0)
 
-    def test_zero_discount_equal_values(self):
-        amount, pct = calculate_discount(2_000_000.0, 2_000_000.0)
-        assert amount == pytest.approx(0.0)
-        assert pct == pytest.approx(0.0)
+    def test_none_inputs_return_none_safely(self):
+        assert calculate_emd_percentage(None, 5_000_000) is None
+        assert calculate_emd_percentage(500_000, None) is None
+        assert calculate_emd_percentage(None, None) is None
 
-    def test_zero_or_negative_estimated_value_returns_none(self):
-        assert calculate_discount(0.0, 1_000_000.0) == (None, None)
-        assert calculate_discount(-500_000.0, 1_000_000.0) == (None, None)
+    def test_zero_or_negative_reserve_returns_none(self):
+        # Never divides by zero
+        assert calculate_emd_percentage(100_000, 0) is None
+        assert calculate_emd_percentage(100_000, -1_000_000) is None
 
-    def test_none_inputs_return_none(self):
-        assert calculate_discount(None, 1_000_000.0) == (None, None)
-        assert calculate_discount(5_000_000.0, None) == (None, None)
-        assert calculate_discount(None, None) == (None, None)
+    def test_negative_emd_returns_none(self):
+        assert calculate_emd_percentage(-50_000, 1_000_000) is None
 
-    def test_zero_opening_bid(self):
-        amount, pct = calculate_discount(5_000_000.0, 0.0)
-        assert amount == pytest.approx(5_000_000.0)
-        assert pct == pytest.approx(100.0)
+    def test_never_assumes_missing_is_zero(self):
+        assert calculate_emd_percentage(None, 1_000_000) is not 0.0
 
 
 @pytest.mark.unit
-class TestCalculatePricePerSqft:
-    def test_standard_price_per_sqft(self):
-        price = 3_000_000.0
-        area = 1_000.0
-        assert calculate_price_per_sqft(price, area) == pytest.approx(3_000.0)
+class TestCalculateReservePricePerSqft:
+    def test_standard_reserve_price_per_sqft(self):
+        rate = calculate_reserve_price_per_sqft(reserve_price=3_000_000, area_sqft=1_000)
+        assert rate == pytest.approx(3_000.0)
 
-    def test_none_or_invalid_inputs(self):
-        assert calculate_price_per_sqft(None, 1_000.0) is None
-        assert calculate_price_per_sqft(3_000_000.0, None) is None
-        assert calculate_price_per_sqft(3_000_000.0, 0.0) is None
-        assert calculate_price_per_sqft(3_000_000.0, -100.0) is None
+    def test_fractional_area_and_precision(self):
+        rate = calculate_reserve_price_per_sqft(reserve_price=2_500_000, area_sqft=850.5)
+        assert rate == pytest.approx(round(2_500_000 / 850.5, 2))
 
-    def test_small_area_fractional_precision(self):
-        res = calculate_price_per_sqft(250_000.0, 50.5)
-        assert res == pytest.approx(250_000.0 / 50.5)
+    def test_missing_area_returns_none(self):
+        assert calculate_reserve_price_per_sqft(3_000_000, None) is None
 
+    def test_missing_reserve_returns_none(self):
+        assert calculate_reserve_price_per_sqft(None, 1_000) is None
 
-@pytest.mark.unit
-class TestCalculateDealScore:
-    def test_standard_score_calculation(self):
-        # 40% discount, risk level 1 -> 40 - (1 * 5) = 35
-        score = calculate_deal_score(40.0, 1)
-        assert score == pytest.approx(35.0)
-
-    def test_score_clamped_to_zero_on_high_risk_low_discount(self):
-        # 5% discount, risk level 3 -> 5 - (3 * 5) = -10 -> clamped to 0
-        score = calculate_deal_score(5.0, 3)
-        assert score == 0.0
-
-    def test_score_clamped_to_100_on_extreme_discount(self):
-        # 120% discount, risk level 1 -> 120 - 5 = 115 -> clamped to 100
-        score = calculate_deal_score(120.0, 1)
-        assert score == 100.0
-
-    def test_none_discount_returns_none(self):
-        assert calculate_deal_score(None, 1) is None
+    def test_zero_or_negative_area_returns_none(self):
+        assert calculate_reserve_price_per_sqft(3_000_000, 0) is None
+        assert calculate_reserve_price_per_sqft(3_000_000, -500) is None
 
 
 @pytest.mark.unit
-class TestConfidenceAdjustedScore:
-    def test_perfect_confidence_leaves_score_unchanged(self):
-        assert calculate_confidence_adjusted_score(80.0, 1.0) == pytest.approx(80.0)
+class TestTransparentAuctionAssessment:
+    def test_insufficient_information_when_reserve_missing(self):
+        financial = FinancialIntelligence(reserve_price=None, emd=None)
+        auction = AuctionIntelligenceDetails()
+        legal = PropertyLegalIntelligence()
 
-    def test_reduced_confidence_scales_score(self):
-        assert calculate_confidence_adjusted_score(80.0, 0.5) == pytest.approx(40.0)
+        assessment = evaluate_auction_assessment(financial, auction, legal)
+        assert assessment.assessment_label == LABEL_INSUFFICIENT_INFO
+        assert any("Reserve price" in m for m in assessment.missing_information)
 
-    def test_none_confidence_returns_base_score(self):
-        assert calculate_confidence_adjusted_score(75.0, None) == 75.0
+    def test_important_risks_identified_when_litigation_disclosed(self):
+        financial = FinancialIntelligence(
+            reserve_price=5_000_000,
+            emd=500_000,
+            emd_percentage=10.0,
+            property_area=1200,
+            reserve_price_per_sqft=4166.67,
+        )
+        auction = AuctionIntelligenceDetails(auction_status="scheduled")
+        legal = PropertyLegalIntelligence(
+            possession_type="physical",
+            pending_litigation=["SA 123/2025 pending before DRT Chandigarh"],
+        )
 
-    def test_none_base_score_returns_none(self):
-        assert calculate_confidence_adjusted_score(None, 0.8) is None
+        assessment = evaluate_auction_assessment(financial, auction, legal)
+        assert assessment.assessment_label == LABEL_IMPORTANT_RISKS
+        assert any("DRT" in c for c in assessment.important_concerns)
 
-    def test_zero_confidence_returns_zero(self):
-        assert calculate_confidence_adjusted_score(75.0, 0.0) == 0.0
+    def test_further_investigation_required_on_symbolic_possession(self):
+        financial = FinancialIntelligence(
+            reserve_price=4_000_000,
+            emd=400_000,
+            emd_percentage=10.0,
+            property_area=1000,
+            reserve_price_per_sqft=4000.0,
+        )
+        auction = AuctionIntelligenceDetails(auction_status="scheduled")
+        legal = PropertyLegalIntelligence(
+            possession_type="symbolic",
+        )
 
+        assessment = evaluate_auction_assessment(financial, auction, legal)
+        assert assessment.assessment_label == LABEL_FURTHER_INVESTIGATION
+        assert any("Section 14" in p for p in assessment.possession_concerns)
+        assert any("Symbolic" in c for c in assessment.important_concerns)
 
-@pytest.mark.unit
-class TestCalculateDealRating:
-    def test_rating_thresholds(self):
-        assert calculate_deal_rating(35.0) == "excellent"
-        assert calculate_deal_rating(30.0) == "excellent"
-        assert calculate_deal_rating(25.0) == "good"
-        assert calculate_deal_rating(20.0) == "good"
-        assert calculate_deal_rating(15.0) == "moderate"
-        assert calculate_deal_rating(10.0) == "moderate"
-        assert calculate_deal_rating(5.0) == "low"
-        assert calculate_deal_rating(-10.0) == "low"
+    def test_no_major_concerns_when_clean_and_physical_possession(self):
+        financial = FinancialIntelligence(
+            reserve_price=3_500_000,
+            emd=350_000,
+            emd_percentage=10.0,
+            property_area=1000,
+            reserve_price_per_sqft=3500.0,
+        )
+        auction = AuctionIntelligenceDetails(
+            auction_status="scheduled",
+            inspection_window="10-Nov-2026 11:00 AM to 02:00 PM",
+        )
+        legal = PropertyLegalIntelligence(
+            possession_type="physical",
+            disclosed_encumbrances=[],
+            pending_litigation=[],
+        )
 
-    def test_none_discount_rating(self):
-        assert calculate_deal_rating(None) is None
+        assessment = evaluate_auction_assessment(financial, auction, legal)
+        assert assessment.assessment_label == LABEL_NO_MAJOR_CONCERNS
 
+    def test_auction_status_is_procedural_not_risk(self):
+        financial = FinancialIntelligence(
+            reserve_price=3_000_000,
+            emd=300_000,
+            emd_percentage=10.0,
+            property_area=900,
+            reserve_price_per_sqft=3333.33,
+        )
+        auction = AuctionIntelligenceDetails(
+            auction_status="active",
+            inspection_window="Scheduled",
+        )
+        legal = PropertyLegalIntelligence(
+            possession_type="physical",
+        )
 
-@pytest.mark.unit
-class TestGetRiskLevel:
-    def test_known_statuses(self):
-        assert get_risk_level("scheduled") == 1
-        assert get_risk_level("upcoming") == 1
-        assert get_risk_level("active") == 2
-        assert get_risk_level("sold") == 3
-        assert get_risk_level("cancelled") == 3
+        assessment = evaluate_auction_assessment(financial, auction, legal)
+        # Status 'active' or 'scheduled' is procedural, not converted into arbitrary risk score
+        assert any("active" in p for p in assessment.procedural_considerations)
+        assert assessment.assessment_label == LABEL_NO_MAJOR_CONCERNS
 
-    def test_case_insensitivity(self):
-        assert get_risk_level("SCHEDULED") == 1
-        assert get_risk_level("Upcoming") == 1
-        assert get_risk_level("AcTiVe") == 2
-
-    def test_unknown_or_none_defaults_to_moderate_risk(self):
-        assert get_risk_level(None) == 2
-        assert get_risk_level("disputed") == 2
-        assert get_risk_level("") == 2
+    def test_market_valuation_explicitly_unavailable(self):
+        financial = FinancialIntelligence()
+        assert financial.market_valuation_status == MARKET_VALUATION_UNAVAILABLE_MESSAGE

@@ -24,18 +24,7 @@ export default function RagResult({ result, compact = false }: Props) {
   const strengths = structured?.strengths ?? [];
   const risks = structured?.risks ?? [];
   const diligence = structured?.due_diligence ?? [];
-  const rating = structured?.deal_rating;
-  const score = structured?.deal_score;
-
-  const verdict =
-    rating ||
-    (score != null && score >= 70
-      ? "Worth a closer look"
-      : score != null && score >= 45
-        ? "Mixed"
-        : score != null
-          ? "Cautious"
-          : null);
+  const verdict = structured?.assessment_label || structured?.deal_rating;
 
   return (
     <article className={`brief-result ${compact ? "brief-compact" : ""}`}>

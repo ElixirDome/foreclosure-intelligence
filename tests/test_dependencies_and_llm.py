@@ -122,9 +122,10 @@ class TestLLMFallbackAndDegradation:
             "estimated_value": None,
         }
         analysis_data = {
-            "deal_score": 65.0,
-            "discount_percentage": 25.0,
-            "risk_level": 2,
+            "assessment_label": "Further investigation required",
+            "possession_type": "symbolic",
+            "emd_percentage": 10.0,
+            "important_concerns": ["Symbolic possession under Section 13(4)"],
         }
 
         fallback = deterministic_property_ai_fallback(prop_data, analysis_data)
@@ -133,12 +134,11 @@ class TestLLMFallbackAndDegradation:
         assert len(fallback.risks) >= 1
         assert len(fallback.due_diligence) >= 1
         assert fallback.recommendation
-        # Must not fabricate missing valuation
-        assert any("valuation" in r.lower() for r in fallback.risks)
+        assert any("possession" in r.lower() or "symbolic" in r.lower() for r in fallback.risks)
 
     def test_generate_property_analysis_falls_back_when_llm_raises(self):
         prop_data = {"address": "123 Fail Safe Rd", "reserve_price": 1000000.0}
-        analysis_data = {"deal_score": 50.0, "discount_percentage": None, "risk_level": 2}
+        analysis_data = {"assessment_label": "Important risks identified", "possession_type": "physical"}
 
         mock_failing_provider = MagicMock()
         mock_failing_provider.generate.side_effect = RuntimeError("Ollama connection refused on localhost:11434")

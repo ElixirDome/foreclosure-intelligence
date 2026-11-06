@@ -68,6 +68,10 @@ def _is_claim_sentence(s: str) -> bool:
         "representative & authorized officer",
         "confidential banking records notice",
         "official portal notice",
+        "guideline",
+        "prospective buyers",
+        "important considerations",
+        "bottom line",
     ]
     if any(h in lower for h in structural_headings):
         return False

@@ -476,46 +476,42 @@ def retrieve_deal_context(
         factors = "\n".join(
             f"{f.direction} {f.label}" for f in deal.factors
         )
-        discount_label = (
-            f"{deal.discount_percentage}%"
-            if deal.discount_percentage is not None
-            else "Not available"
+        reserve_str = f"₹{deal.reserve_price:,.0f}" if deal.reserve_price is not None else "Undisclosed"
+        emd_str = (
+            f"₹{deal.emd:,.0f} ({deal.emd_percentage:.1f}%)"
+            if deal.emd is not None and deal.emd_percentage is not None
+            else "Undisclosed"
         )
-        discount_amount_label = (
-            f"₹{deal.discount_amount:,.0f}"
-            if deal.discount_amount is not None
-            else "Not available"
+        psf_str = (
+            f"₹{deal.reserve_price_per_sqft:,.2f} per sq ft"
+            if deal.reserve_price_per_sqft is not None
+            else "Not calculated (area unspecified)"
         )
-        price_per_sqft_label = (
-            f"₹{deal.price_per_sqft:,.0f}"
-            if deal.price_per_sqft is not None
-            else "Not available"
-        )
+
         text = (
-            f"Deal assessment for property {pid}.\n"
-            f"Deal score: {deal.deal_score} out of 100.\n"
-            f"Deal rating: {deal.deal_rating or 'Not available'}.\n"
-            f"Discount against estimated market value: {discount_label}.\n"
-            f"Estimated discount amount: {discount_amount_label}.\n"
-            f"Price per square foot: {price_per_sqft_label}.\n"
-            f"Risk level: {deal.risk_level}.\n"
-            f"Bank opening bid: {deal.opening_bid if deal.opening_bid is not None else 'Not recorded'}.\n"
-            f"Comparable-based market estimate: {deal.estimated_value if deal.estimated_value is not None else 'Not available'}.\n"
-            f"Comparables used: {deal.comparable_count}.\n"
-            f"Factors: {factors or 'No additional factors recorded'}.\n"
-            f"Explanation: {deal.explanation}"
+            f"Auction Intelligence for property {pid}.\n"
+            f"Assessment: {deal.assessment_label}.\n"
+            f"Reserve price: {reserve_str}.\n"
+            f"EMD: {emd_str}.\n"
+            f"Reserve price per sq ft: {psf_str}.\n"
+            f"Possession type: {deal.possession_type}.\n"
+            f"Auction status: {deal.auction_status or 'Scheduled'}.\n"
+            f"Market valuation: {deal.market_valuation_status}.\n"
+            f"Factors:\n{factors or 'No additional factors recorded'}.\n"
+            f"Summary:\n{deal.explanation}"
         )
         items.append(
             ContextItem(
                 kind="deal",
                 source_id=f"deal:{pid}",
-                title=f"deal score {deal.deal_score}",
+                title=f"Auction Assessment: {deal.assessment_label}",
                 text=text,
                 score=1.0,
                 metadata={
                     "property_id": pid,
-                    "deal_score": deal.deal_score,
-                    "deal_rating": deal.deal_rating,
+                    "assessment_label": deal.assessment_label,
+                    "deal_score": None,
+                    "deal_rating": None,
                 },
             )
         )

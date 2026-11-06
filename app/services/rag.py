@@ -53,6 +53,7 @@ class StructuredAnalysis:
     risks: list[str] = field(default_factory=list)
     due_diligence: list[str] = field(default_factory=list)
     recommendation: str = ""
+    assessment_label: str | None = None
     deal_score: float | None = None
     deal_rating: str | None = None
 
@@ -118,11 +119,13 @@ def _structured_from_context(ctx: MultiSourceContext) -> StructuredAnalysis:
     diligence: list[str] = []
     deal_score = None
     deal_rating = None
+    assessment_label = None
     recommendation = "Insufficient data for a firm recommendation."
 
     deals = ctx.by_kind("deal")
     if deals:
         top = deals[0]
+        assessment_label = top.metadata.get("assessment_label")
         deal_score = top.metadata.get("deal_score")
         deal_rating = top.metadata.get("deal_rating")
         for line in top.text.splitlines():
@@ -187,25 +190,18 @@ def _structured_from_context(ctx: MultiSourceContext) -> StructuredAnalysis:
     else:
         diligence.append("Confirm key fields against source documents")
 
-    if deal_score is not None:
-        if deal_score >= 70:
-            recommendation = (
-                f"Deal score {deal_score:.0f}/100 suggests a potentially "
-                f"attractive opportunity, subject to due diligence."
-            )
-        elif deal_score >= 40:
-            recommendation = (
-                f"Deal score {deal_score:.0f}/100 is mixed — proceed only "
-                f"after validating valuation and legal risk."
-            )
+    if assessment_label:
+        if assessment_label == "No major concerns identified in the available documents":
+            recommendation = "Documentation and physical possession appear clean. Proceed with physical site inspection and title verification."
+        elif assessment_label == "Important risks identified":
+            recommendation = "Important legal or property risks identified in available documents. Detailed title search and legal consultation strictly recommended."
+        elif assessment_label == "Insufficient information":
+            recommendation = "Key auction or property parameters are missing. Clarification from bank officer strictly required before participation."
         else:
-            recommendation = (
-                f"Deal score {deal_score:.0f}/100 is weak — high caution advised."
-            )
+            recommendation = "Further investigation required on possession status, title deeds, and pending statutory liabilities before bidding."
     elif props and docs:
         recommendation = (
-            "Property and document context exist, but deal scoring is "
-            "incomplete (missing valuation and/or comparables)."
+            "Property and document context exist. Verification of possession and legal title with bank is recommended."
         )
 
     summary_parts = []
@@ -213,14 +209,8 @@ def _structured_from_context(ctx: MultiSourceContext) -> StructuredAnalysis:
         summary_parts.append(f"Analyzed {len(props)} property record(s).")
     if docs:
         summary_parts.append(f"Retrieved {len(docs)} document excerpt(s).")
-    if comps:
-        summary_parts.append(f"Included {len(comps)} comparable(s).")
-    if deal_score is not None:
-        summary_parts.append(
-            f"Deal score {deal_score:.0f}"
-            + (f" ({deal_rating})" if deal_rating else "")
-            + "."
-        )
+    if assessment_label:
+        summary_parts.append(f"Assessment: {assessment_label}.")
     if not summary_parts:
         summary_parts.append(
             "Limited multi-source context was available for this question."
@@ -241,6 +231,7 @@ def _structured_from_context(ctx: MultiSourceContext) -> StructuredAnalysis:
         risks=uniq(risks)[:8],
         due_diligence=uniq(diligence)[:8],
         recommendation=recommendation,
+        assessment_label=assessment_label,
         deal_score=deal_score,
         deal_rating=deal_rating,
     )
@@ -253,10 +244,9 @@ def _format_structured_answer(
 ) -> str:
     """Produce a readable fallback without exposing internal retrieval labels."""
     paragraphs = [analysis.summary.strip()] if analysis.summary else []
-    if analysis.deal_score is not None:
-        rating = f" ({analysis.deal_rating})" if analysis.deal_rating else ""
+    if analysis.assessment_label:
         paragraphs.append(
-            f"The current deal score is {analysis.deal_score:.0f} out of 100{rating}."
+            f"Assessment Label: {analysis.assessment_label}"
         )
     if analysis.strengths:
         paragraphs.append("Potential positives: " + "; ".join(analysis.strengths) + ".")

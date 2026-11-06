@@ -46,6 +46,7 @@ class TestStableEmbeddings:
                 os.environ,
                 PYTHONHASHSEED=seed,
                 OLLAMA_EMBEDDING_MODEL="",
+                GEMINI_API_KEY="",
             )
             outputs.append(
                 subprocess.check_output(

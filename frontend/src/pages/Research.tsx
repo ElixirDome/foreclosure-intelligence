@@ -30,7 +30,7 @@ const PROPERTY_PROMPTS = [
 ];
 
 export default function Research() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const propertyIdParam = params.get("property_id");
   const propertyId = propertyIdParam ? Number(propertyIdParam) : null;
 

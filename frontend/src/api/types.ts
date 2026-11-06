@@ -12,11 +12,19 @@ export interface Property {
   auction_date: string | null;
   foreclosure_status: string | null;
   opening_bid: number | null;
-  estimated_value: number | null;
+  reserve_price?: number | null;
+  emd?: number | null;
+  emd_percentage?: number | null;
+  reserve_price_per_sqft?: number | null;
   property_type: string | null;
   survey_number: string | null;
-  discount_percentage: number | null;
-  deal_score: number | null;
+  possession_type?: string | null;
+  bank_name?: string | null;
+  branch_name?: string | null;
+  market_valuation_status?: string | null;
+  estimated_value?: number | null;
+  discount_percentage?: number | null;
+  deal_score?: number | null;
 }
 
 export interface Citation {
@@ -39,8 +47,9 @@ export interface StructuredAnalysis {
   risks: string[];
   due_diligence: string[];
   recommendation: string;
-  deal_score: number | null;
-  deal_rating: string | null;
+  assessment_label?: string | null;
+  deal_score?: number | null;
+  deal_rating?: string | null;
 }
 
 export interface RAGResponse {
@@ -70,21 +79,80 @@ export interface EvidenceItem {
   confidence: number | null;
 }
 
-export interface DealIntelligence {
-  property_id: number;
-  deal_score: number | null;
-  deal_rating: string | null;
-  discount_amount: number | null;
-  discount_percentage: number | null;
-  price_per_sqft: number | null;
-  risk_level: number;
-  estimated_value: number | null;
-  opening_bid: number | null;
-  comparable_count: number;
+export interface PropertyAnalysis {
   reserve_price: number | null;
   emd: number | null;
+  emd_percentage: number | null;
+  area_sqft: number | null;
+  reserve_price_per_sqft: number | null;
+  disclosed_outstanding_dues: string | number | null;
+  other_financial_obligations: string[];
+  market_valuation_status: string;
+
+  auction_date: string | null;
+  auction_start: string | null;
+  auction_end: string | null;
+  emd_deadline: string | null;
+  inspection_start: string | null;
+  inspection_end: string | null;
+  inspection_window: string | null;
+  auction_status: string | null;
+  bank_name: string | null;
+  branch_name: string | null;
+  contact_details: string | null;
+  auction_platform: string | null;
+
+  possession_type: string | null;
+  disclosed_encumbrances: string[];
+  pending_litigation: string[];
+  title_concerns: string[];
+  property_discrepancies: string[];
+  missing_documentation: string[];
+  bank_conditions: string[];
+
+  assessment_label: string;
+  important_concerns: string[];
+  missing_information: string[];
+  financial_considerations: string[];
+  possession_concerns: string[];
+  procedural_considerations: string[];
+  summary: string;
+
+  opening_bid?: number | null;
+  estimated_value?: number | null;
+  discount_amount?: number | null;
+  discount_percentage?: number | null;
+  price_per_sqft?: number | null;
+  potential_upside?: number | null;
+  deal_score?: number | null;
+  deal_rating?: string | null;
+  valuation_confidence?: number | null;
+  risk_level?: number | null;
+}
+
+export interface DealIntelligence {
+  property_id: number;
+  assessment_label: string;
+  reserve_price: number | null;
+  emd: number | null;
+  emd_percentage: number | null;
+  property_area: number | null;
+  reserve_price_per_sqft: number | null;
+  disclosed_outstanding_dues: string | number | null;
+  possession_type: string;
+  auction_status: string | null;
   factors: { direction: string; label: string; detail?: string | null }[];
   explanation: string;
+  market_valuation_status: string;
+  deal_score?: number | null;
+  deal_rating?: string | null;
+  discount_amount?: number | null;
+  discount_percentage?: number | null;
+  price_per_sqft?: number | null;
+  risk_level?: number;
+  estimated_value?: number | null;
+  opening_bid?: number | null;
+  comparable_count?: number;
 }
 
 export interface DocumentItem {

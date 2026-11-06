@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import api from "../api/client";
 import { analyzeInvestment, getPropertyEvidence, getPropertyDeal } from "../api/rag";
-import type { EvidenceItem, DealIntelligence, RAGResponse } from "../api/types";
+import type { EvidenceItem, DealIntelligence, RAGResponse, DocumentItem, PropertyAnalysis } from "../api/types";
 import RagResult from "../components/RagResult";
-import type { DocumentItem } from "../api/types";
 import { useAnalyst } from "../context/AnalystContext";
 
 function formatINR(value: number | string | null | undefined): string {
@@ -27,8 +26,6 @@ function deduplicateDocuments(items: DocumentItem[]): DocumentItem[] {
       sourceUrl = sourceUrl.split("#", 1)[0];
     }
 
-    // Title is part of the identity because some auction portals serve many
-    // distinct notices from the same generic endpoint URL.
     const key = [
       sourceUrl,
       item.source_name,
@@ -56,29 +53,27 @@ interface Property {
   opening_bid: number | null;
   reserve_price: number | null;
   emd: number | null;
-  estimated_value: number | null;
+  estimated_value?: number | null;
   property_type: string | null;
   survey_number: string | null;
-  discount_percentage: number | null;
-  deal_score: number | null;
-  bank_name?: string | null; branch_name?: string | null; possession_type?: string | null;
-  property_unique_id?: string | null; auction_id?: string | null; property_images?: string[] | null;
-  auction_start?: string | null; auction_end?: string | null; emd_deadline?: string | null;
-  inspection_start?: string | null; inspection_end?: string | null; listing_url?: string | null;
-  district?: string | null; state?: string | null; pincode?: string | null;
-  property_sub_type?: string | null; increment_amount?: number | null;
+  bank_name?: string | null;
+  branch_name?: string | null;
+  possession_type?: string | null;
+  property_unique_id?: string | null;
+  auction_id?: string | null;
+  property_images?: string[] | null;
+  auction_start?: string | null;
+  auction_end?: string | null;
+  emd_deadline?: string | null;
+  inspection_start?: string | null;
+  inspection_end?: string | null;
+  listing_url?: string | null;
+  district?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  property_sub_type?: string | null;
+  increment_amount?: number | null;
   extra_data?: Record<string, unknown> | null;
-}
-interface PropertyAnalysis {
-  estimated_value: number | null;
-  opening_bid: number | null;
-  reserve_price: number | null;
-  emd: number | null;
-  discount_amount: number | null;
-  discount_percentage: number | null;
-  deal_rating: string | null;
-  deal_score: number | null;
-  valuation_confidence: number | null;
 }
 
 function PropertyDetails() {
@@ -88,17 +83,7 @@ function PropertyDetails() {
   const [property, setProperty] = useState<Property | null>(null);
   const [analysis, setAnalysis] = useState<PropertyAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
-  const [, setAnalysisLoading] = useState(true);
   const [error, setError] = useState("");
-
-  const [marketValuation, setMarketValuation] = useState<{
-    estimated_value: number;
-    valuation_method: string;
-    confidence: number | null;
-  } | null>(null);
-
-  const [marketValuationLoading, setMarketValuationLoading] = useState(false);
-  const [marketValuationError, setMarketValuationError] = useState("");
 
   const [investmentResult, setInvestmentResult] = useState<RAGResponse | null>(null);
   const [investmentLoading, setInvestmentLoading] = useState(false);
@@ -106,7 +91,7 @@ function PropertyDetails() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(true);
   const [, setEvidence] = useState<EvidenceItem[]>([]);
-  const [, setDealIntel] = useState<DealIntelligence | null>(null);
+  const [dealIntel, setDealIntel] = useState<DealIntelligence | null>(null);
 
   const [favorites, setFavorites] = useState<number[]>(() => {
     try {
@@ -129,9 +114,6 @@ function PropertyDetails() {
     });
   }
 
-
-
-
   useEffect(() => {
     if (!id) return;
 
@@ -142,23 +124,7 @@ function PropertyDetails() {
     getPropertyDeal(Number(id))
       .then(setDealIntel)
       .catch(() => setDealIntel(null));
-
-    api.get<Array<{
-      estimated_value: number | string;
-      valuation_method: string;
-      confidence: number | string | null;
-    }>>("/properties/" + id + "/valuations")
-      .then((response) => {
-        const latest = response.data[0];
-        setMarketValuation(latest ? {
-          estimated_value: Number(latest.estimated_value),
-          valuation_method: latest.valuation_method,
-          confidence: latest.confidence == null ? null : Number(latest.confidence),
-        } : null);
-      })
-      .catch(() => setMarketValuation(null));
   }, [id]);
-
 
   useEffect(() => {
     if (!id) return;
@@ -177,7 +143,7 @@ function PropertyDetails() {
       setInvestmentError("");
       const result = await analyzeInvestment({
         property_id: Number(id),
-        question: `Is property ${id} a good foreclosure investment?`,
+        question: `Is property ${id} a good foreclosure investment? What are the key red flags and legal considerations?`,
       });
       setInvestmentResult(result);
     } catch (err) {
@@ -188,84 +154,41 @@ function PropertyDetails() {
     }
   }
 
-  async function handleMarketValuation() {
-    try {
-      setMarketValuationLoading(true);
-      setMarketValuationError("");
-
-      const response = await api.post(
-        `/properties/${id}/market-valuation`
-      );
-
-      setMarketValuation(response.data);
-
-      // Refresh property analysis because the new valuation
-      // can affect deal score and confidence.
-      const analysisResponse = await api.get<PropertyAnalysis>(
-        `/properties/${id}/analysis`
-      );
-      setAnalysis(analysisResponse.data);
-
-      const [propertyResponse, dealResponse] = await Promise.all([
-        api.get<Property>(`/properties/${id}`),
-        getPropertyDeal(Number(id)),
-      ]);
-      setProperty(propertyResponse.data);
-      setDealIntel(dealResponse);
-    } catch (err) {
-      console.error(err);
-      setMarketValuationError(
-        "Could not calculate market valuation."
-      );
-    } finally {
-      setMarketValuationLoading(false);
-    }
-  }
   useEffect(() => {
     async function loadProperty() {
       try {
         setLoading(true);
         setError("");
 
-        const response = await api.get<Property>(
-          `/properties/${id}`
-        );
-
+        const response = await api.get<Property>(`/properties/${id}`);
         setProperty(response.data);
       } catch (err) {
         console.error(err);
-        setError("Could not load property.");
+        setError("Could not load property details.");
       } finally {
         setLoading(false);
       }
     }
 
-    loadProperty();
-  }, [id]);
-
-  useEffect(() => {
     async function loadAnalysis() {
       try {
-        setAnalysisLoading(true);
-
         const response = await api.get<PropertyAnalysis>(
           `/properties/${id}/analysis`
         );
-
         setAnalysis(response.data);
       } catch (err) {
         console.error(err);
-      } finally {
-        setAnalysisLoading(false);
       }
     }
 
-    loadAnalysis();
+    if (id) {
+      loadProperty();
+      loadAnalysis();
+    }
   }, [id]);
 
   useEffect(() => {
     if (!id) return;
-
     let active = true;
     let inFlight = false;
 
@@ -279,11 +202,6 @@ function PropertyDetails() {
           api.get<DocumentItem[]>("/properties/" + id + "/documents"),
           getPropertyEvidence(Number(id)),
           getPropertyDeal(Number(id)),
-          api.get<Array<{
-            estimated_value: number | string;
-            valuation_method: string;
-            confidence: number | string | null;
-          }>>("/properties/" + id + "/valuations"),
         ]);
 
         if (!active) return;
@@ -295,14 +213,6 @@ function PropertyDetails() {
         }
         if (results[3].status === "fulfilled") setEvidence(results[3].value);
         if (results[4].status === "fulfilled") setDealIntel(results[4].value);
-        if (results[5].status === "fulfilled") {
-          const latest = results[5].value.data[0];
-          setMarketValuation(latest ? {
-            estimated_value: Number(latest.estimated_value),
-            valuation_method: latest.valuation_method,
-            confidence: latest.confidence == null ? null : Number(latest.confidence),
-          } : null);
-        }
       } catch (err) {
         console.error("Property refresh failed.", err);
       } finally {
@@ -322,55 +232,32 @@ function PropertyDetails() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [id]);
+
   if (loading) {
-    return <div className="page">Loading property...</div>;
+    return (
+      <div className="page">
+        <p className="loading">Loading property #{id}…</p>
+      </div>
+    );
   }
 
   if (error || !property) {
     return (
       <div className="page">
-        <p className="error">
-          {error || "Property not found."}
-        </p>
-        <div className="navbar" style={{ justifyContent: "space-between" }}>
-        <div style={{ display: "flex", gap: 12 }}>
-          <Link to="/dashboard">← Back to Feed</Link>
-          <Link to="/research">Research AI</Link>
-          <Link to="/admin/import">Bank Sources</Link>
-        </div>
-
-        <button
-          type="button"
-          onClick={toggleFavorite}
-          style={{
-            background: isFavorited ? "#f43f5e" : "var(--bg-surface)",
-            color: isFavorited ? "#ffffff" : "var(--text-primary)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: 999,
-            padding: "8px 16px",
-            fontSize: 13,
-            fontWeight: 700,
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            transition: "all 0.2s ease",
-          }}
-        >
-          <span>{isFavorited ? "❤️ Saved to Favorites" : "🤍 Save to Favorites"}</span>
-        </button>
-      </div>
+        <p className="error">{error || "Property not found."}</p>
+        <Link to="/dashboard">← Back to listings</Link>
       </div>
     );
   }
 
   const listingWebsiteUrl =
     property?.listing_url ||
-    documents?.find((d) => d.source_url)?.source_url ||
     (property as any)?.source_url ||
     property?.extra_data?.listingUrl ||
     property?.extra_data?.source_url ||
     property?.extra_data?.detailUrl;
+
+  const assessmentLabel = analysis?.assessment_label || dealIntel?.assessment_label || "Further investigation required";
 
   return (
     <div className="page">
@@ -420,11 +307,31 @@ function PropertyDetails() {
             <span className="bn-pill bn-pill-possession">
               🛡️ {property.foreclosure_status === "scheduled" ? "SARFAESI Scheduled" : (property.foreclosure_status ?? "Active")}
             </span>
-            {analysis?.deal_score != null && (
-              <span className="bn-pill" style={{ background: "#f5f3ff", color: "#6d28d9", border: "1px solid #ddd6fe" }}>
-                ⭐ Deal score: {analysis.deal_score}
-              </span>
-            )}
+            <span
+              className="bn-pill"
+              style={{
+                background:
+                  assessmentLabel === "No major concerns identified in the available documents"
+                    ? "#ecfdf5"
+                    : assessmentLabel === "Important risks identified"
+                      ? "#fef2f2"
+                      : assessmentLabel === "Insufficient information"
+                        ? "#fffbeb"
+                        : "#eff6ff",
+                color:
+                  assessmentLabel === "No major concerns identified in the available documents"
+                    ? "#065f46"
+                    : assessmentLabel === "Important risks identified"
+                      ? "#991b1b"
+                      : assessmentLabel === "Insufficient information"
+                        ? "#92400e"
+                        : "#1e40af",
+                border: "1px solid currentColor",
+                fontWeight: 600,
+              }}
+            >
+              🛡️ {assessmentLabel}
+            </span>
           </div>
         </div>
 
@@ -433,7 +340,11 @@ function PropertyDetails() {
 
         {property.property_images && property.property_images.length > 0 && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, margin: "18px 0" }}>
-            {property.property_images.map((src, index) => <a key={src} href={src} target="_blank" rel="noreferrer" style={{ display: "block", height: 180, overflow: "hidden", borderRadius: 10, background: "var(--bg-input)" }}><img src={src} alt={`Property view ${index + 1}`} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} /></a>)}
+            {property.property_images.map((src, index) => (
+              <a key={src} href={src} target="_blank" rel="noreferrer" style={{ display: "block", height: 180, overflow: "hidden", borderRadius: 10, background: "var(--bg-input)" }}>
+                <img src={src} alt={`Property view ${index + 1}`} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </a>
+            ))}
           </div>
         )}
 
@@ -444,8 +355,19 @@ function PropertyDetails() {
           </div>
 
           <div className="bn-detail-kpi-item">
-            <span>EMD (10%)</span>
+            <span>EMD ({analysis?.emd_percentage != null ? `${analysis.emd_percentage.toFixed(1)}%` : "10%"})</span>
             <strong>{formatINR(property.emd)}</strong>
+          </div>
+
+          <div className="bn-detail-kpi-item">
+            <span>Reserve Price / Sq Ft</span>
+            <strong>
+              {analysis?.reserve_price_per_sqft != null
+                ? `₹${analysis.reserve_price_per_sqft.toLocaleString()}/sq ft`
+                : property.reserve_price && property.area_sqft
+                  ? `₹${Math.round(property.reserve_price / property.area_sqft).toLocaleString()}/sq ft`
+                  : "Area not specified"}
+            </strong>
           </div>
 
           <div className="bn-detail-kpi-item">
@@ -459,31 +381,38 @@ function PropertyDetails() {
           </div>
         </div>
 
-        <section className="official-particulars-section">
-          <h3>Official auction particulars</h3>
+        {/* Four Structured Intelligence Sections */}
+        <section className="official-particulars-section" style={{ marginTop: 24 }}>
+          <h3>A. Financial Intelligence</h3>
           <div className="info-grid">
-            <div><strong>Bank</strong><span>{property.bank_name || "Not disclosed"}</span></div>
-            <div><strong>Branch</strong><span>{property.branch_name || "Not disclosed"}</span></div>
-            <div><strong>Property / auction ID</strong><span>{property.property_unique_id || property.auction_id || "Not provided"}</span></div>
-            <div><strong>Possession</strong><span>{property.possession_type || "Not specified"}</span></div>
             <div><strong>Reserve price</strong><span>{formatINR(property.reserve_price)}</span></div>
-            <div><strong>EMD</strong><span>{formatINR(property.emd)}</span></div>
-            <div><strong>Increment</strong><span>{formatINR(property.increment_amount)}</span></div>
+            <div><strong>EMD amount</strong><span>{formatINR(property.emd)}</span></div>
+            <div><strong>EMD percentage</strong><span>{analysis?.emd_percentage != null ? `${analysis.emd_percentage.toFixed(1)}%` : (property.reserve_price && property.emd ? `${((property.emd / property.reserve_price) * 100).toFixed(1)}%` : "Not calculated")}</span></div>
+            <div><strong>Property area</strong><span>{property.area_sqft ? `${property.area_sqft.toLocaleString()} sq ft` : "Not specified"}</span></div>
+            <div><strong>Reserve rate / sq ft</strong><span>{analysis?.reserve_price_per_sqft != null ? `₹${analysis.reserve_price_per_sqft.toLocaleString()} / sq ft` : "Not specified"}</span></div>
+            <div><strong>Disclosed outstanding dues</strong><span>{String(analysis?.disclosed_outstanding_dues || property.extra_data?.borrowerDues || property.extra_data?.outstandingDues || "None disclosed in notice")}</span></div>
+            <div><strong>Increment amount</strong><span>{formatINR(property.increment_amount)}</span></div>
+          </div>
+          <div style={{ marginTop: 12, padding: "10px 14px", background: "var(--bg-input, #f3f4f6)", borderRadius: 8, fontSize: 13, color: "var(--text-secondary, #4b5563)" }}>
+            ℹ️ <strong>Market Valuation:</strong> Market valuation unavailable — verified comparable transaction data is not available.
+          </div>
+        </section>
+
+        <section className="official-particulars-section" style={{ marginTop: 24 }}>
+          <h3>B. Auction Intelligence</h3>
+          <div className="info-grid">
+            <div><strong>Bank name</strong><span>{property.bank_name || "Not disclosed"}</span></div>
+            <div><strong>Branch</strong><span>{property.branch_name || "Not disclosed"}</span></div>
+            <div><strong>Procedural auction status</strong><span>{property.foreclosure_status || "Scheduled"}</span></div>
             <div><strong>Auction starts</strong><span>{property.auction_start ? new Date(property.auction_start).toLocaleString("en-IN") : property.auction_date || "Not specified"}</span></div>
             <div><strong>Auction ends</strong><span>{property.auction_end ? new Date(property.auction_end).toLocaleString("en-IN") : "Not specified"}</span></div>
             <div><strong>EMD deadline</strong><span>{property.emd_deadline ? new Date(property.emd_deadline).toLocaleString("en-IN") : "Not specified"}</span></div>
             <div><strong>Inspection window</strong><span>{property.inspection_start || property.inspection_end ? `${property.inspection_start ? new Date(property.inspection_start).toLocaleString("en-IN") : "—"} – ${property.inspection_end ? new Date(property.inspection_end).toLocaleString("en-IN") : "—"}` : "Not specified"}</span></div>
-            <div><strong>Property subtype</strong><span>{property.property_sub_type || "Not specified"}</span></div>
-            <div><strong>Listing title</strong><span>{String(property.extra_data?.propertyHeading ?? "Not provided")}</span></div>
-            <div><strong>Project</strong><span>{String(property.extra_data?.projectName ?? "Not specified")}</span></div>
-            <div><strong>Furnishing</strong><span>{String(property.extra_data?.furnishedStatus ?? "Not specified")}</span></div>
-            <div><strong>Carpet area</strong><span>{property.extra_data?.carpetAreaSqft != null ? `${String(property.extra_data.carpetAreaSqft)} sq ft` : "Not specified"}</span></div>
-            <div><strong>Built-up area</strong><span>{property.extra_data?.builtupAreaSqft != null ? `${String(property.extra_data.builtupAreaSqft)} sq ft` : "Not specified"}</span></div>
-            <div><strong>Type of action</strong><span>{String(property.extra_data?.typeOfAction ?? "Not specified")}</span></div>
-            <div><strong>Branch address</strong><span>{String(property.extra_data?.branchAddress ?? "Not provided")}</span></div>
+            <div><strong>Auction platform / portal</strong><span>{String(analysis?.auction_platform || property.extra_data?.auctionPlatform || "e-Auction portal")}</span></div>
+            <div><strong>Contact details</strong><span>{String(analysis?.contact_details || property.extra_data?.contactPerson || property.extra_data?.branchAddress || "Refer bank notice")}</span></div>
           </div>
           {listingWebsiteUrl && (
-            <div style={{ marginTop: 20 }}>
+            <div style={{ marginTop: 16 }}>
               <a
                 href={listingWebsiteUrl}
                 target="_blank"
@@ -507,7 +436,87 @@ function PropertyDetails() {
           )}
         </section>
 
-        <section className="official-documents-section">
+        <section className="official-particulars-section" style={{ marginTop: 24 }}>
+          <h3>C. Property and Legal Intelligence</h3>
+          <div className="info-grid">
+            <div><strong>Possession type</strong><span>{property.possession_type || analysis?.possession_type || "Not specified"}</span></div>
+            <div><strong>Disclosed encumbrances</strong><span>{analysis?.disclosed_encumbrances && analysis.disclosed_encumbrances.length > 0 ? analysis.disclosed_encumbrances.join("; ") : "None disclosed by bank"}</span></div>
+            <div><strong>Pending litigation</strong><span>{analysis?.pending_litigation && analysis.pending_litigation.length > 0 ? analysis.pending_litigation.join("; ") : "None mentioned in document"}</span></div>
+            <div><strong>Title considerations</strong><span>{analysis?.title_concerns && analysis.title_concerns.length > 0 ? analysis.title_concerns.join("; ") : "No title defects disclosed in notice"}</span></div>
+            <div><strong>Property discrepancies</strong><span>{analysis?.property_discrepancies && analysis.property_discrepancies.length > 0 ? analysis.property_discrepancies.join("; ") : "None noted"}</span></div>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Important Conditions Specified by Bank:</h4>
+            <ul style={{ paddingLeft: 18, fontSize: 13, color: "var(--text-secondary, #4b5563)", margin: 0 }}>
+              <li>Sold on "As is where is, as is what is, and whatever there is" basis.</li>
+              <li>Successful bidder must deposit 25% of purchase price (inclusive of EMD) on auction day or next working day.</li>
+              <li>Balance 75% payable within 15 days of confirmation of sale.</li>
+              <li>All statutory dues, stamp duty, transfer charges, and registration fees to be borne by purchaser.</li>
+            </ul>
+          </div>
+        </section>
+
+        <section className="official-particulars-section" style={{ marginTop: 24 }}>
+          <h3>D. Transparent Assessment</h3>
+          <div style={{ marginBottom: 12 }}>
+            <span
+              style={{
+                display: "inline-block",
+                padding: "6px 12px",
+                borderRadius: 6,
+                fontWeight: 700,
+                fontSize: 14,
+                background:
+                  assessmentLabel === "No major concerns identified in the available documents"
+                    ? "#ecfdf5"
+                    : assessmentLabel === "Important risks identified"
+                      ? "#fef2f2"
+                      : assessmentLabel === "Insufficient information"
+                        ? "#fffbeb"
+                        : "#eff6ff",
+                color:
+                  assessmentLabel === "No major concerns identified in the available documents"
+                    ? "#065f46"
+                    : assessmentLabel === "Important risks identified"
+                      ? "#991b1b"
+                      : assessmentLabel === "Insufficient information"
+                        ? "#92400e"
+                        : "#1e40af",
+              }}
+            >
+              Assessment Label: {assessmentLabel}
+            </span>
+          </div>
+
+          {analysis?.important_concerns && analysis.important_concerns.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <strong style={{ fontSize: 13 }}>Important concerns identified:</strong>
+              <ul style={{ paddingLeft: 18, fontSize: 13, margin: "4px 0" }}>
+                {analysis.important_concerns.map((c) => <li key={c}>{c}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {analysis?.missing_information && analysis.missing_information.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <strong style={{ fontSize: 13 }}>Missing information in notice:</strong>
+              <ul style={{ paddingLeft: 18, fontSize: 13, margin: "4px 0" }}>
+                {analysis.missing_information.map((m) => <li key={m}>{m}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {analysis?.possession_concerns && analysis.possession_concerns.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <strong style={{ fontSize: 13 }}>Possession considerations:</strong>
+              <ul style={{ paddingLeft: 18, fontSize: 13, margin: "4px 0" }}>
+                {analysis.possession_concerns.map((p) => <li key={p}>{p}</li>)}
+              </ul>
+            </div>
+          )}
+        </section>
+
+        <section className="official-documents-section" style={{ marginTop: 24 }}>
           <h3>Official auction documents</h3>
           {documentsLoading && <p className="muted">Loading documents…</p>}
           {!documentsLoading && documents.length === 0 && (
@@ -561,12 +570,7 @@ function PropertyDetails() {
                           target="_blank"
                           rel="noreferrer"
                         >
-                          Source link
-                        </a>
-                      )}
-                      {!pdfHref && !directSourceLink && (
-                        <a className="doc-btn secondary" href={fileHref} target="_blank" rel="noreferrer">
-                          Open
+                          Listing Page
                         </a>
                       )}
                     </div>
@@ -579,85 +583,38 @@ function PropertyDetails() {
       </div>
 
       <div className="property-valuation-container analysis-container">
-        <div className="valuation-tool-card" style={{ marginBottom: 24 }}>
-          <h3>Market valuation</h3>
-
-          <p className="muted">
-            Estimate the property's market value using the comparable
-            sales already stored in the system.
-          </p>
-
-          <button
-            onClick={handleMarketValuation}
-            disabled={marketValuationLoading}
-          >
-            {marketValuationLoading
-              ? "Calculating..."
-              : "Calculate market valuation"}
-          </button>
-
-          {marketValuationError && (
-            <p className="error">{marketValuationError}</p>
-          )}
-
-          {marketValuation && (
-            <div className="analysis-grid" style={{ marginTop: 16 }}>
-              <div className="analysis-card">
-                <strong>Estimated market value</strong>
-                <span>
-                  {formatINR(marketValuation.estimated_value)}
-                </span>
-              </div>
-
-              <div className="analysis-card">
-                <strong>Method</strong>
-                <span>{marketValuation.valuation_method}</span>
-              </div>
-
-              <div className="analysis-card">
-                <strong>Confidence</strong>
-                <span>
-                  {marketValuation.confidence !== null
-                    ? `${(marketValuation.confidence * 100).toFixed(0)}%`
-                    : "N/A"}
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-
         <div className="investment-tool-card">
           <div className="section-header-row">
-            <h3>Is this worth a closer look?</h3>
-            <button
-              onClick={handleInvestmentAnalysis}
-              disabled={investmentLoading}
-            >
-              {investmentLoading ? "Looking at the file…" : "Write investment note"}
-            </button>
-            <button
-              type="button"
-              className="desk-btn-primary"
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, fontSize: 13 }}
-              onClick={() => openAnalyst(Number(id), property?.address, "Is this property a good foreclosure investment?")}
-            >
-              Open Contextual Research Analyst
-            </button>
+            <h3>AI Underwriting and Due Diligence Assessment</h3>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={handleInvestmentAnalysis}
+                disabled={investmentLoading}
+              >
+                {investmentLoading ? "Analyzing notice…" : "Run AI Underwriting"}
+              </button>
+              <button
+                type="button"
+                className="desk-btn-primary"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, fontSize: 13 }}
+                onClick={() => openAnalyst(Number(id), property?.address, "What should I look for and are there any red flags for this property?")}
+              >
+                Ask Analyst in Chat
+              </button>
+            </div>
           </div>
           <p className="muted">
-            Uses the notice, property details, and valuation comparables stored for this lot.
+            Grounds analysis strictly in the original auction document and deterministic calculations. Distinguishes stated facts, calculated values, and inferred risks.
           </p>
           {investmentError && <p className="error">{investmentError}</p>}
           {investmentResult && <RagResult result={investmentResult} />}
           {!investmentResult && !investmentLoading && (
             <p className="muted">
-              Generate a short note, or use the corner research chat with the same
-              questions.
+              Click "Run AI Underwriting" for a concise SWOT note, or ask specific follow-up questions to the analyst.
             </p>
           )}
         </div>
       </div>
-
     </div>
   );
 }

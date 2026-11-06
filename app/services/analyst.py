@@ -33,10 +33,6 @@ from app.services.query_understanding import (
     classify_query,
 )
 from app.services.rag import Citation, RAGAnswer, StructuredAnalysis, answer_question
-from app.services.valuation import (
-    find_comparables,
-    calculate_valuation_from_comparables,
-)
 
 
 @dataclass
@@ -540,14 +536,6 @@ def _handle_valuation_explanation(db: Session, property_id: int, question: str) 
             property_id=property_id,
         )
 
-    comparables = find_comparables(db, prop)
-    valuation_calc = None
-    if prop.area_sqft and prop.area_sqft > 0 and len(comparables) >= 3:
-        try:
-            valuation_calc = calculate_valuation_from_comparables(prop.area_sqft, comparables)
-        except Exception:
-            pass
-
     deal = build_deal_intelligence(db, property_id)
 
     lines = [
@@ -555,6 +543,14 @@ def _handle_valuation_explanation(db: Session, property_id: int, question: str) 
         f"Address: {prop.address} ({prop.city or 'Unspecified City'})",
         f"Asset Scope: {prop.property_type or 'Residential Property'} | Area: {prop.area_sqft or 'Unknown'} sq ft",
         "",
+        "Valuation Status: Market valuation unavailable — verified comparable transaction data is not available.",
+        "",
+        f"Published Reserve Price: ₹{prop.reserve_price:,.0f}" if prop.reserve_price else "Published Reserve Price: Undisclosed",
+        f"Reserve Price per Sq.Ft.: ₹{deal.reserve_price_per_sqft:,.2f} / sq ft" if deal and deal.reserve_price_per_sqft else "Reserve Price per Sq.Ft.: Area not specified",
+        f"Earnest Money Deposit (EMD): ₹{prop.emd:,.0f} ({deal.emd_percentage:.1f}%)" if prop.emd and deal and deal.emd_percentage else "Earnest Money Deposit (EMD): Undisclosed",
+        "",
+        "Guideline: Foreclosure Intelligence does not manufacture arbitrary valuations or unverified discounts.",
+        "Prospective buyers must verify local registrar guideline values and conduct independent on-site appraisal before bidding.",
     ]
 
     citations = [
@@ -562,68 +558,11 @@ def _handle_valuation_explanation(db: Session, property_id: int, question: str) 
             kind="property",
             source_id=f"prop:{prop.id}",
             title=f"Property Listing #{prop.id}: {prop.address}",
-            excerpt=f"Address: {prop.address}, City: {prop.city or 'Gurdaspur'}, Reserve Price: ₹{prop.reserve_price or 0:,.2f}, Area: {prop.area_sqft} sqft, Type: {prop.property_type}",
+            excerpt=f"Address: {prop.address}, City: {prop.city or 'General'}, Reserve Price: ₹{prop.reserve_price or 0:,.0f}, Area: {prop.area_sqft} sqft, Type: {prop.property_type}. Market valuation unavailable — verified comparable transaction data is not available.",
             score=1.0,
             property_id=property_id,
         )
     ]
-    if valuation_calc:
-        med_psf = valuation_calc["median_price_per_sqft"]
-        est_val = valuation_calc["estimated_value"]
-        conf = valuation_calc["confidence"]
-        citations.append(
-            Citation(
-                kind="valuation",
-                source_id=f"val:{prop.id}",
-                title=f"Automated Valuation Model for Lot #{prop.id}",
-                excerpt=f"Estimated Market Value: ₹{est_val:,.2f}, Median PSF: ₹{med_psf:,.2f}, Confidence: {conf * 100:.0f}%, based on {len(comparables)} comparable sales in {prop.city}.",
-                score=0.95,
-                property_id=property_id,
-            )
-        )
-        lines.extend([
-            f"Estimated Market Value: ₹{est_val:,.2f}",
-            "Valuation Method: Residential Comparable Sales Analysis (Statistical Median)",
-            f"Median Price / Sq.Ft.: ₹{med_psf:,.2f} / sq.ft. applied to {prop.area_sqft} sq.ft.",
-            f"Confidence Score: {conf * 100:.0f}%",
-            f"Comparables Used: {len(comparables)} eligible sales in same locality within ±30% area tolerance",
-            "",
-            "Supporting Comparable Sales:",
-        ])
-
-        for idx, comp in enumerate(comparables[:4], start=1):
-            psf = comp.sale_price / comp.area_sqft if comp.area_sqft else 0
-            lines.append(
-                f"{idx}. {comp.address} ({comp.city or ''}) — ₹{comp.sale_price:,.0f} ({comp.area_sqft} sq.ft. @ ₹{psf:,.0f}/sq.ft.) [Source: {comp.source}]"
-            )
-            citations.append(
-                Citation(
-                    kind="comparable",
-                    source_id=f"comp:{comp.id}",
-                    title=f"Comparable #{comp.id}: {comp.address}",
-                    excerpt=f"Sold for ₹{comp.sale_price:,.0f} ({comp.area_sqft} sqft). Price/sqft: ₹{psf:,.0f}",
-                    score=0.9,
-                    property_id=property_id,
-                )
-            )
-
-        if deal and deal.reserve_price:
-            diff = est_val - deal.reserve_price
-            pct = (diff / est_val) * 100
-            lines.extend([
-                "",
-                "Reserve Price vs. Market Estimate:",
-                f"Reserve Price: ₹{deal.reserve_price:,.2f}",
-                f"Discount: ₹{diff:,.2f} ({pct:.1f}% discount to market estimate)",
-                f"Deal Score: {deal.deal_score:.0f}/100 ({deal.deal_rating or 'unrated'})",
-            ])
-    else:
-        lines.extend([
-            "Valuation Status: No Automated Valuation Available",
-            f"Requirement: At least 3 eligible comparable sales within ±30% area tolerance in {prop.city or 'this district'}.",
-            f"Current count: {len(comparables)} matching sales found in database.",
-            "Policy: Valuations are only calculated when sufficient comparable evidence exists.",
-        ])
 
     action_links = [
         {"title": f"View Full Property File #{prop.id}", "url": f"/properties/{prop.id}"},
@@ -811,33 +750,33 @@ def _handle_deal_inquiry(db: Session, property_id: int, question: str) -> Analys
         )
 
     deal = build_deal_intelligence(db, property_id)
-    score = deal.deal_score if deal else None
-    rating = (deal.deal_rating if deal else None) or "Moderate"
-    discount = deal.discount_percentage if deal else None
+    assessment_label = deal.assessment_label if deal else "Further investigation required"
 
-    reserve_str = f"Rs. {prop.reserve_price:,.2f}" if prop.reserve_price else "Not stated"
-    emd_str = f"Rs. {prop.emd:,.2f}" if prop.emd else "Not stated"
-    est_val_str = f"Rs. {deal.estimated_value:,.2f}" if (deal and deal.estimated_value) else "Benchmark pending"
+    reserve_str = f"₹{prop.reserve_price:,.0f}" if prop.reserve_price else "Undisclosed"
+    emd_str = (
+        f"₹{prop.emd:,.0f} ({deal.emd_percentage:.1f}%)"
+        if prop.emd and deal and deal.emd_percentage is not None
+        else (f"₹{prop.emd:,.0f}" if prop.emd else "Undisclosed")
+    )
+    psf_str = f"₹{deal.reserve_price_per_sqft:,.2f} / sq ft" if deal and deal.reserve_price_per_sqft else "Area not specified"
+    possession_str = (deal.possession_type.capitalize() if deal else "Not specified")
 
     lines = [
         f"### Deal Assessment: Lot #{prop.id}",
         f"Address: {prop.address}",
         "",
-        f"Verdict: {'Favorable opportunity' if score and score >= 65 else 'Moderate prospective deal with due diligence required'}.",
-        f"Deal Score: {f'{score:.0f}/100 ({rating})' if score is not None else 'N/A'}",
-        f"Reserve Price: {reserve_str} vs Estimated Value: {est_val_str}" + (f" ({discount:.1f}% discount)" if discount else ""),
+        f"Assessment: {assessment_label}",
+        f"Possession Status: {possession_str}",
+        f"Reserve Price: {reserve_str} (Rate: {psf_str})",
         f"Earnest Money Deposit (EMD): {emd_str}",
+        "Market Valuation: Market valuation unavailable — verified comparable transaction data is not available.",
         "",
-        "Key Strengths:",
+        "Financial & Legal Considerations:",
     ]
     if deal and deal.factors:
-        strengths = [f.label for f in deal.factors if f.direction == "+"]
-        if strengths:
-            lines.extend(f"• {s}" for s in strengths[:2])
-        else:
-            lines.append("• Public auction listing under SARFAESI Act")
+        lines.extend(f"• {f.label}" for f in deal.factors[:3])
     else:
-        lines.append("• Public auction listing under SARFAESI Act")
+        lines.append("• Public auction notice under SARFAESI Act")
 
     lines.extend([
         "",
@@ -845,7 +784,11 @@ def _handle_deal_inquiry(db: Session, property_id: int, question: str) -> Analys
         "• Possession Status: Verify whether the bank holds physical keys or only symbolic enforcement.",
         "• Title and Dues: Check for unpaid municipal taxes, electricity arrears, and obtain a 30-year Encumbrance Certificate.",
         "",
-        "Bottom Line: " + (deal.explanation if deal and deal.explanation else "Favorable entry price relative to market benchmark. Verify physical possession and confirm clear title before bidding."),
+        f"Bottom Line: {assessment_label}. " + (
+            "Clean documentation on record. Verify physical possession and title before bidding."
+            if assessment_label == "No major concerns identified in the available documents"
+            else "Further legal and physical due diligence required before participation."
+        ),
     ])
 
     action_links = [
@@ -865,7 +808,7 @@ def _handle_deal_inquiry(db: Session, property_id: int, question: str) -> Analys
                 kind="property",
                 source_id=f"prop:{prop.id}",
                 title=f"Property Listing #{prop.id}: {prop.address}",
-                excerpt=f"Reserve: {reserve_str}, EMD: {emd_str}, Score: {score}, Discount: {discount}%",
+                excerpt=f"Reserve: {reserve_str}, EMD: {emd_str}, Assessment: {assessment_label}",
                 score=1.0,
                 property_id=property_id,
             )
@@ -1487,20 +1430,26 @@ def _handle_discovery_search(
     candidates = query.limit(30).all()
 
     if is_best_query and candidates:
-        scored: list[tuple[float, float, float, Property, Any]] = []
+        scored: list[tuple[int, float, Property, Any]] = []
         for p in candidates:
             deal = build_deal_intelligence(db, p.id)
-            score = float(deal.deal_score) if (deal and deal.deal_score is not None) else 0.0
-            disc = float(deal.discount_percentage) if (deal and deal.discount_percentage is not None) else 0.0
+            label = deal.assessment_label if deal else "Further investigation required"
+            # Prioritize clean documents / physical possession
+            rank = (
+                4 if label == "No major concerns identified in the available documents"
+                else 3 if label == "Further investigation required"
+                else 2 if label == "Important risks identified"
+                else 1
+            )
             rp = float(p.reserve_price) if p.reserve_price is not None else 1e9
-            scored.append((score, disc, -rp, p, deal))
+            scored.append((rank, -rp, p, deal))
 
         if "cheapest" in q_lower:
-            scored.sort(key=lambda x: -x[2])  # rp ascending
+            scored.sort(key=lambda x: -x[1])  # rp ascending
         else:
-            scored.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+            scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
-        results_with_deal = [(x[3], x[4]) for x in scored[:6]]
+        results_with_deal = [(x[2], x[3]) for x in scored[:6]]
         results = [x[0] for x in results_with_deal]
     else:
         results = query.order_by(Property.auction_date.desc().nullslast(), Property.id.desc()).limit(6).all()
@@ -1522,11 +1471,8 @@ def _handle_discovery_search(
             emd_str = f" | EMD: ₹{p.emd:,.0f}" if p.emd else ""
 
             deal_str = ""
-            if deal and deal.deal_score is not None:
-                rating = deal.deal_rating or "Deal"
-                deal_str = f" — {rating} (Score: {deal.deal_score:.0f}/100)"
-                if deal.discount_percentage is not None and deal.discount_percentage > 0:
-                    deal_str += f" · {deal.discount_percentage:.1f}% discount"
+            if deal and deal.assessment_label:
+                deal_str = f" — {deal.assessment_label}"
 
             lines.append(
                 f"Lot #{p.id}: {p.address} ({p.city or 'General'}){deal_str}\n"

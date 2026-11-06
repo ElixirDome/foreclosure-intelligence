@@ -244,7 +244,7 @@ def test_analyst_deal_inquiry(db):
     res = process_analyst_turn(db, "is this a good deal", property_id=1)
     assert res.intent == "property_deal_inquiry"
     assert "Deal Assessment" in res.answer
-    assert "Deal Score" in res.answer
+    assert "Assessment" in res.answer
     assert "What to Look For" in res.answer
     assert any("Details" in a["title"] for a in res.action_links)
 

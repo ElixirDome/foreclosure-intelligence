@@ -13,14 +13,14 @@ from app.services.normalization import create_property_key
 
 from app.services.valuation import record_valuation
 
-from app.domain.deal_analysis import (
-    DEAL_SCORE_RISK_MULTIPLIER,
-    FORECLOSURE_RISK_LEVELS,
-    calculate_deal_score,
-    calculate_deal_rating,
-    calculate_discount,
-    calculate_price_per_sqft,
-    calculate_confidence_adjusted_score,
+from app.domain.auction_intelligence import (
+    calculate_emd_percentage,
+    calculate_reserve_price_per_sqft,
+    evaluate_auction_assessment,
+    MARKET_VALUATION_UNAVAILABLE_MESSAGE,
+    FinancialIntelligence,
+    AuctionIntelligenceDetails,
+    PropertyLegalIntelligence,
 )
 def get_property_by_id(
     property_id: int,
@@ -149,99 +149,7 @@ def get_properties(
     app.domain.deal_analysis.
     """
 
-    trusted_estimate = (
-        select(PropertyValuation.estimated_value)
-        .where(
-            PropertyValuation.property_id == Property.id,
-            PropertyValuation.source == "market_comparables",
-            PropertyValuation.valuation_method == "residential_comparable_sales",
-        )
-        .order_by(PropertyValuation.id.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
-
-    discount_percentage = case(
-        (
-            and_(
-                trusted_estimate.is_not(None),
-                Property.reserve_price.is_not(None),
-                trusted_estimate > 0,
-            ),
-            (
-                (
-                    trusted_estimate
-                    - Property.reserve_price
-                )
-                / trusted_estimate
-                * 100
-            ),
-        ),
-        else_=None,
-    ).label("discount_percentage")
-
-    risk_level = case(
-        *[
-            (
-                func.lower(Property.foreclosure_status) == status,
-                risk,
-            )
-            for status, risk in FORECLOSURE_RISK_LEVELS.items()
-        ],
-        else_=2,
-    )
-
-    raw_deal_score = (
-        discount_percentage
-        - (risk_level * DEAL_SCORE_RISK_MULTIPLIER)
-    )
-
-    trusted_confidence = (
-        select(PropertyValuation.confidence)
-        .where(
-            PropertyValuation.property_id == Property.id,
-            PropertyValuation.source == "market_comparables",
-            PropertyValuation.valuation_method == "residential_comparable_sales",
-        )
-        .order_by(PropertyValuation.id.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
-
-    base_deal_score = case(
-        (
-            discount_percentage.is_(None),
-            None,
-        ),
-        (
-            raw_deal_score < 0,
-            0,
-        ),
-        (
-            raw_deal_score > 100,
-            100,
-        ),
-        else_=raw_deal_score,
-    )
-
-    deal_score = case(
-        (
-            base_deal_score.is_(None),
-            None,
-        ),
-        (
-            trusted_confidence.is_not(None),
-            func.round(base_deal_score * trusted_confidence, 2),
-        ),
-        else_=base_deal_score,
-    ).label("deal_score")
-
-    query = db.query(
-        Property,
-        discount_percentage,
-        deal_score,
-        trusted_estimate.label("trusted_estimated_value"),
-    )
+    query = db.query(Property)
 
     # Search across address, city, and locality
     if search:
@@ -270,37 +178,6 @@ def get_properties(
 
     if max_area is not None:
         query = query.filter(Property.area_sqft <= max_area)
-
-    # Discount filters
-    if min_discount is not None:
-        query = query.filter(
-            trusted_estimate.is_not(None),
-            Property.reserve_price.is_not(None),
-            trusted_estimate > 0,
-            (
-                (
-                    trusted_estimate
-                    - Property.reserve_price
-                )
-                / trusted_estimate
-                * 100
-            ) >= min_discount,
-        )
-
-    if max_discount is not None:
-        query = query.filter(
-            trusted_estimate.is_not(None),
-            Property.reserve_price.is_not(None),
-            trusted_estimate > 0,
-            (
-                (
-                    trusted_estimate
-                    - Property.reserve_price
-                )
-                / trusted_estimate
-                * 100
-            ) <= max_discount,
-        )
 
     # Foreclosure status
     if foreclosure_status is not None:
@@ -405,7 +282,13 @@ def get_properties(
 
     properties = []
 
-    for property, discount, score, trusted_estimated_value in results:
+    for property in results:
+        res_price = float(property.reserve_price) if property.reserve_price is not None else None
+        emd_val = float(property.emd) if getattr(property, "emd", None) is not None else None
+        area_val = float(property.area_sqft) if property.area_sqft is not None else None
+        emd_pct = calculate_emd_percentage(emd_val, res_price)
+        res_psf = calculate_reserve_price_per_sqft(res_price, area_val)
+
         property_data = {
             "id": property.id,
             "address": property.address,
@@ -418,21 +301,11 @@ def get_properties(
             "auction_date": property.auction_date,
             "foreclosure_status": property.foreclosure_status,
             "opening_bid": property.opening_bid,
-            "reserve_price": (
-                float(property.reserve_price)
-                if property.reserve_price is not None
-                else None
-            ),
-            "emd": (
-                float(property.emd)
-                if getattr(property, "emd", None) is not None
-                else None
-            ),
-            "estimated_value": (
-                float(trusted_estimated_value)
-                if trusted_estimated_value is not None
-                else None
-            ),
+            "reserve_price": res_price,
+            "emd": emd_val,
+            "emd_percentage": emd_pct,
+            "reserve_price_per_sqft": res_psf,
+            "estimated_value": None,
             "property_type": property.property_type,
             "property_sub_type": property.property_sub_type,
             "survey_number": property.survey_number,
@@ -453,16 +326,9 @@ def get_properties(
             "listing_url": property.listing_url,
             "extra_data": property.extra_data or {},
             "raw_status": property.raw_status,
-            "discount_percentage": (
-                float(discount)
-                if discount is not None
-                else None
-            ),
-            "deal_score": (
-                float(score)
-                if score is not None
-                else None
-            ),
+            "market_valuation_status": MARKET_VALUATION_UNAVAILABLE_MESSAGE,
+            "discount_percentage": None,
+            "deal_score": None,
         }
 
         properties.append(property_data)
@@ -591,90 +457,214 @@ def get_property_or_404(# helper function
 # It should always produce the same answer for the same property.
 
 def analyze_property(property: Property):
-    valuation_confidence = None
-    automated_valuations = [
-        valuation
-        for valuation in property.valuations
-        if valuation.source == "market_comparables"
-        and valuation.valuation_method == "residential_comparable_sales"
-    ]
-    latest_valuation = (
-        max(automated_valuations, key=lambda valuation: valuation.id)
-        if automated_valuations
-        else None
-    )
-    if latest_valuation is not None:
-        if latest_valuation.confidence is not None:
-            valuation_confidence = float(latest_valuation.confidence)
-        estimated_value = float(latest_valuation.estimated_value)
-    else:
-        # Do not trust legacy estimates that were typed into property fields.
-        estimated_value = None
-    opening_bid = (
-        float(property.opening_bid)
-        if property.opening_bid is not None
-        else None
-    )
-    reserve_price = (
-        float(property.reserve_price)
-        if property.reserve_price is not None
-        else None
-    )
-    emd = float(property.emd) if property.emd is not None else None
+    """
+    Deterministic auction intelligence analysis.
+    Eliminates unverified AVM estimates, arbitrary deal scores, and discount ratings.
+    Evaluates financial intelligence, operational particulars, legal intelligence, and transparent assessments.
+    """
+    extra = property.extra_data or {}
 
-    result = {
-        "estimated_value": estimated_value,
-        "opening_bid": opening_bid,
+    # Financial Intelligence
+    reserve_price = float(property.reserve_price) if property.reserve_price is not None else None
+    emd = float(property.emd) if getattr(property, "emd", None) is not None else None
+    area_sqft = float(property.area_sqft) if property.area_sqft is not None else None
+    opening_bid = float(property.opening_bid) if property.opening_bid is not None else None
+
+    emd_percentage = calculate_emd_percentage(emd, reserve_price)
+    reserve_psf = calculate_reserve_price_per_sqft(reserve_price, area_sqft)
+
+    disclosed_dues = (
+        extra.get("borrowerDues")
+        or extra.get("outstandingDues")
+        or extra.get("statutoryDues")
+        or extra.get("dues")
+    )
+    if disclosed_dues:
+        disclosed_dues = str(disclosed_dues).strip()
+
+    financial_obligations: list[str] = []
+    if extra.get("otherObligations"):
+        raw_obs = extra.get("otherObligations")
+        if isinstance(raw_obs, list):
+            financial_obligations.extend(str(o) for o in raw_obs if o)
+        elif isinstance(raw_obs, str):
+            financial_obligations.append(raw_obs)
+    if extra.get("pendingElectricityDues"):
+        financial_obligations.append(f"Electricity dues: {extra.get('pendingElectricityDues')}")
+    if extra.get("societyMaintenanceDues"):
+        financial_obligations.append(f"Society maintenance: {extra.get('societyMaintenanceDues')}")
+
+    financial = FinancialIntelligence(
+        reserve_price=reserve_price,
+        emd=emd,
+        emd_percentage=emd_percentage,
+        property_area=area_sqft,
+        reserve_price_per_sqft=reserve_psf,
+        disclosed_outstanding_dues=disclosed_dues,
+        other_financial_obligations=financial_obligations,
+        market_valuation_status=MARKET_VALUATION_UNAVAILABLE_MESSAGE,
+    )
+
+    # Operational Auction Intelligence
+    contact_parts: list[str] = []
+    if extra.get("contactPerson"):
+        contact_parts.append(f"Officer: {extra.get('contactPerson')}")
+    if extra.get("contactPhone") or extra.get("phone"):
+        contact_parts.append(f"Phone: {extra.get('contactPhone') or extra.get('phone')}")
+    if extra.get("contactEmail") or extra.get("email"):
+        contact_parts.append(f"Email: {extra.get('contactEmail') or extra.get('email')}")
+    if extra.get("branchAddress"):
+        contact_parts.append(f"Branch: {extra.get('branchAddress')}")
+    contact_details = " | ".join(contact_parts) if contact_parts else None
+
+    inspection_window = None
+    if property.inspection_start or property.inspection_end:
+        s_str = property.inspection_start.strftime("%d-%b-%Y %I:%M %p") if property.inspection_start else ""
+        e_str = property.inspection_end.strftime("%d-%b-%Y %I:%M %p") if property.inspection_end else ""
+        inspection_window = f"{s_str} to {e_str}".strip(" to ")
+
+    platform = extra.get("auctionPlatform")
+    if not platform and property.listing_url:
+        platform = property.listing_url.split("/")[2] if "://" in property.listing_url else None
+
+    auction = AuctionIntelligenceDetails(
+        auction_date=property.auction_date,
+        auction_start=property.auction_start,
+        auction_end=property.auction_end,
+        emd_deadline=property.emd_deadline,
+        inspection_start=property.inspection_start,
+        inspection_end=property.inspection_end,
+        inspection_window=inspection_window,
+        auction_status=property.foreclosure_status or "scheduled",
+        bank_name=property.bank_name,
+        branch_name=property.branch_name,
+        contact_details=contact_details,
+        auction_platform=platform,
+    )
+
+    # Property and Legal Intelligence
+    possession_raw = property.possession_type or extra.get("possessionType") or extra.get("possession")
+    if possession_raw:
+        pos_lower = str(possession_raw).strip().lower()
+        if "physical" in pos_lower:
+            possession_type = "physical"
+        elif "symbolic" in pos_lower:
+            possession_type = "symbolic"
+        else:
+            possession_type = pos_lower
+    else:
+        possession_type = "not specified"
+
+    disclosed_encumbrances: list[str] = []
+    if extra.get("encumbrances"):
+        raw_enc = extra.get("encumbrances")
+        if isinstance(raw_enc, list):
+            disclosed_encumbrances.extend(str(e) for e in raw_enc if e)
+        else:
+            disclosed_encumbrances.append(str(raw_enc))
+
+    pending_litigation: list[str] = []
+    if extra.get("litigation") or extra.get("pendingLitigation"):
+        raw_lit = extra.get("litigation") or extra.get("pendingLitigation")
+        if isinstance(raw_lit, list):
+            pending_litigation.extend(str(l) for l in raw_lit if l)
+        else:
+            pending_litigation.append(str(raw_lit))
+
+    title_concerns: list[str] = []
+    if extra.get("titleConcerns"):
+        raw_tc = extra.get("titleConcerns")
+        if isinstance(raw_tc, list):
+            title_concerns.extend(str(t) for t in raw_tc if t)
+        else:
+            title_concerns.append(str(raw_tc))
+
+    property_discrepancies: list[str] = []
+    if extra.get("discrepancies"):
+        raw_disc = extra.get("discrepancies")
+        if isinstance(raw_disc, list):
+            property_discrepancies.extend(str(d) for d in raw_disc if d)
+        else:
+            property_discrepancies.append(str(raw_disc))
+
+    missing_documentation: list[str] = []
+    bank_conditions = [
+        "Sold on 'As is where is, as is what is, and whatever there is' basis",
+        "Successful bidder must deposit 25% of purchase price (inclusive of EMD) on same/next day",
+        "Balance 75% within 15 days of confirmation of sale",
+    ]
+    if extra.get("customConditions"):
+        raw_cc = extra.get("customConditions")
+        if isinstance(raw_cc, list):
+            bank_conditions.extend(str(c) for c in raw_cc if c)
+
+    legal = PropertyLegalIntelligence(
+        possession_type=possession_type,
+        disclosed_encumbrances=disclosed_encumbrances,
+        pending_litigation=pending_litigation,
+        title_concerns=title_concerns,
+        property_discrepancies=property_discrepancies,
+        missing_documentation=missing_documentation,
+        bank_conditions=bank_conditions,
+    )
+
+    assessment = evaluate_auction_assessment(
+        financial=financial,
+        auction=auction,
+        legal=legal,
+    )
+
+    return {
+        # Financial Intelligence
         "reserve_price": reserve_price,
         "emd": emd,
+        "emd_percentage": emd_percentage,
+        "area_sqft": area_sqft,
+        "reserve_price_per_sqft": reserve_psf,
+        "disclosed_outstanding_dues": disclosed_dues,
+        "other_financial_obligations": financial_obligations,
+        "market_valuation_status": MARKET_VALUATION_UNAVAILABLE_MESSAGE,
+        # Auction Intelligence
+        "auction_date": property.auction_date,
+        "auction_start": property.auction_start,
+        "auction_end": property.auction_end,
+        "emd_deadline": property.emd_deadline,
+        "inspection_start": property.inspection_start,
+        "inspection_end": property.inspection_end,
+        "inspection_window": inspection_window,
+        "auction_status": property.foreclosure_status or "scheduled",
+        "bank_name": property.bank_name,
+        "branch_name": property.branch_name,
+        "contact_details": contact_details,
+        "auction_platform": platform,
+        # Property and Legal Intelligence
+        "possession_type": possession_type,
+        "disclosed_encumbrances": disclosed_encumbrances,
+        "pending_litigation": pending_litigation,
+        "title_concerns": title_concerns,
+        "property_discrepancies": property_discrepancies,
+        "missing_documentation": missing_documentation,
+        "bank_conditions": bank_conditions,
+        # Transparent Assessment
+        "assessment_label": assessment.assessment_label,
+        "important_concerns": assessment.important_concerns,
+        "missing_information": assessment.missing_information,
+        "financial_considerations": assessment.financial_considerations,
+        "possession_concerns": assessment.possession_concerns,
+        "procedural_considerations": assessment.procedural_considerations,
+        "summary": assessment.summary,
+        # Legacy fields
+        "opening_bid": opening_bid,
+        "estimated_value": None,
         "discount_amount": None,
         "discount_percentage": None,
-        "price_per_sqft": None,
+        "price_per_sqft": reserve_psf,
         "potential_upside": None,
-        "risk_level": None,
+        "risk_level": 1,
         "deal_rating": None,
         "deal_score": None,
-        "valuation_confidence": valuation_confidence,
+        "valuation_confidence": None,
     }
-
-    # A lister's opening bid is not a substitute for a published reserve.
-    if estimated_value is None or estimated_value <= 0 or reserve_price is None:
-        return result
-
-    discount_amount, discount_percentage = calculate_discount(
-        estimated_value,
-        reserve_price,
-    )
-    price_per_sqft = calculate_price_per_sqft(
-        reserve_price,
-        property.area_sqft,
-    )
-
-    status = (
-        property.foreclosure_status.lower()
-        if property.foreclosure_status
-        else None
-    )
-    risk_level = FORECLOSURE_RISK_LEVELS.get(status, 2)
-    base_score = calculate_deal_score(discount_percentage, risk_level)
-    confidence_adjusted_score = calculate_confidence_adjusted_score(
-        base_score,
-        valuation_confidence,
-    )
-    deal_rating = calculate_deal_rating(discount_percentage)
-
-    result.update(
-        {
-            "discount_amount": discount_amount,
-            "discount_percentage": discount_percentage,
-            "price_per_sqft": price_per_sqft,
-            "potential_upside": discount_amount,
-            "risk_level": risk_level,
-            "deal_rating": deal_rating,
-            "deal_score": confidence_adjusted_score,
-        }
-    )
-    return result
 
 #It takes those facts and asks the LLM to interpret them.
 def analyze_property_with_ai(

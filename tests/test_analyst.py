@@ -105,7 +105,8 @@ def test_analyst_valuation_explanation(db):
     res = process_analyst_turn(db, "How was the property value calculated?", property_id=1)
     assert res.intent == "valuation_explanation"
     assert "Lot #1" in res.answer
-    assert "Estimated Market Value" in res.answer
+    assert "Market valuation unavailable" in res.answer
+    assert "Published Reserve Price" in res.answer
     assert len(res.citations) >= 1
 
 

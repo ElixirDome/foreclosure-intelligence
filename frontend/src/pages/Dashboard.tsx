@@ -25,12 +25,14 @@ interface Property {
   foreclosure_status: string | null;
   reserve_price?: number | null;
   emd?: number | null;
+  emd_percentage?: number | null;
+  reserve_price_per_sqft?: number | null;
   opening_bid: number | null;
   estimated_value: number | null;
   property_type: string | null;
   survey_number: string | null;
-  discount_percentage: number | null;
-  deal_score: number | null;
+  discount_percentage?: number | null;
+  deal_score?: number | null;
   sources?: PropertySource[];
   bank_name?: string | null; branch_name?: string | null; possession_type?: string | null;
   property_unique_id?: string | null; auction_id?: string | null; property_images?: string[] | null;
@@ -96,7 +98,7 @@ function Dashboard() {
   }
 
   // Quick Filter Stories
-  const [activeStory, setActiveStory] = useState<"all" | "favs" | "live" | "deals" | "local" | "comm">("all");
+  const [activeStory, setActiveStory] = useState<"all" | "favs" | "live" | "physical" | "local" | "comm">("all");
 
   // Check if user needs onboarding or analyst open requested
   useEffect(() => {
@@ -144,8 +146,6 @@ function Dashboard() {
   const [maxArea, setMaxArea] = useState("");
 
   const [bedrooms, setBedrooms] = useState("");
-  const [minDiscount, setMinDiscount] = useState("");
-  const [maxDiscount, setMaxDiscount] = useState("");
   const [sortBy, setSortBy] = useState("id");
   const [order, setOrder] = useState("desc");
   const [page, setPage] = useState(1);
@@ -171,8 +171,6 @@ function Dashboard() {
       minArea: string;
       maxArea: string;
       bedrooms: string;
-      minDiscount: string;
-      maxDiscount: string;
     }>
   ) {
     try {
@@ -188,8 +186,6 @@ function Dashboard() {
       const curMinArea = filterOverrides?.minArea !== undefined ? filterOverrides.minArea : minArea;
       const curMaxArea = filterOverrides?.maxArea !== undefined ? filterOverrides.maxArea : maxArea;
       const curBedrooms = filterOverrides?.bedrooms !== undefined ? filterOverrides.bedrooms : bedrooms;
-      const curMinDiscount = filterOverrides?.minDiscount !== undefined ? filterOverrides.minDiscount : minDiscount;
-      const curMaxDiscount = filterOverrides?.maxDiscount !== undefined ? filterOverrides.maxDiscount : maxDiscount;
 
       const params: Record<string, string | number> = {
         page: targetPage,
@@ -204,8 +200,6 @@ function Dashboard() {
       if (curMinArea) params.min_area = Number(curMinArea);
       if (curMaxArea) params.max_area = Number(curMaxArea);
       if (curBedrooms) params.bedrooms = Number(curBedrooms);
-      if (curMinDiscount) params.min_discount = Number(curMinDiscount);
-      if (curMaxDiscount) params.max_discount = Number(curMaxDiscount);
       if (curStatus) params.foreclosure_status = curStatus;
       if (curType) params.property_type = curType;
 
@@ -239,19 +233,19 @@ function Dashboard() {
   // Ref to hold current filter values so SSE event handler doesn't suffer from stale closures
   const filtersRef = useRef({
     search, status, propertyType, minPrice, maxPrice, minArea, maxArea,
-    bedrooms, minDiscount, maxDiscount, sortBy, order, page,
+    bedrooms, sortBy, order, page,
     activeStory, userPreferences, favorites,
   });
 
   useEffect(() => {
     filtersRef.current = {
       search, status, propertyType, minPrice, maxPrice, minArea, maxArea,
-      bedrooms, minDiscount, maxDiscount, sortBy, order, page,
+      bedrooms, sortBy, order, page,
       activeStory, userPreferences, favorites,
     };
   }, [
     search, status, propertyType, minPrice, maxPrice, minArea, maxArea,
-    bedrooms, minDiscount, maxDiscount, sortBy, order, page,
+    bedrooms, sortBy, order, page,
     activeStory, userPreferences, favorites,
   ]);
 
@@ -275,8 +269,6 @@ function Dashboard() {
       if (filters.minArea) params.min_area = Number(filters.minArea);
       if (filters.maxArea) params.max_area = Number(filters.maxArea);
       if (filters.bedrooms) params.bedrooms = Number(filters.bedrooms);
-      if (filters.minDiscount) params.min_discount = Number(filters.minDiscount);
-      if (filters.maxDiscount) params.max_discount = Number(filters.maxDiscount);
       if (filters.status) params.foreclosure_status = filters.status;
       if (filters.propertyType) params.property_type = filters.propertyType;
 
@@ -423,7 +415,7 @@ function Dashboard() {
               matches = false;
             }
 
-            if (curStory === "deals" && (newProp.discount_percentage == null || newProp.discount_percentage < 20)) {
+            if (curStory === "physical" && !(newProp.possession_type?.toLowerCase().includes("physical"))) {
               matches = false;
             }
 
@@ -545,8 +537,6 @@ function Dashboard() {
     setMinArea("");
     setMaxArea("");
     setBedrooms("");
-    setMinDiscount("");
-    setMaxDiscount("");
     setActiveStory("all");
     setPage(1);
 
@@ -559,8 +549,6 @@ function Dashboard() {
       minArea: "",
       maxArea: "",
       bedrooms: "",
-      minDiscount: "",
-      maxDiscount: "",
     });
   }
 
@@ -572,8 +560,8 @@ function Dashboard() {
     if (activeStory === "live") {
       return prop.foreclosure_status === "scheduled" || prop.foreclosure_status === "active";
     }
-    if (activeStory === "deals") {
-      return prop.discount_percentage != null && prop.discount_percentage >= 20;
+    if (activeStory === "physical") {
+      return prop.possession_type?.toLowerCase().includes("physical");
     }
     if (activeStory === "local") {
       const loc = (userPreferences?.district || userPreferences?.city || "").toLowerCase();
@@ -709,11 +697,11 @@ function Dashboard() {
 
         <button
           type="button"
-          className={`ig-story-pill ${activeStory === "deals" ? "active" : ""}`}
-          onClick={() => setActiveStory("deals")}
+          className={`ig-story-pill ${activeStory === "physical" ? "active" : ""}`}
+          onClick={() => setActiveStory("physical")}
         >
-          <span>🏷️</span>
-          <span>Value Deals &gt;20% Off ({summary.properties_with_estimates})</span>
+          <span>🔑</span>
+          <span>Physical Possession</span>
         </button>
 
         <button
@@ -814,26 +802,6 @@ function Dashboard() {
           placeholder="Bedrooms (BHK)"
           value={bedrooms}
           onChange={(e) => setBedrooms(e.target.value)}
-          style={{ background: "var(--bg-input)", color: "var(--text-primary)", borderColor: "var(--border-subtle)", width: 130 }}
-        />
-
-        <input
-          type="number"
-          min="0"
-          max="100"
-          placeholder="Min discount %"
-          value={minDiscount}
-          onChange={(e) => setMinDiscount(e.target.value)}
-          style={{ background: "var(--bg-input)", color: "var(--text-primary)", borderColor: "var(--border-subtle)", width: 130 }}
-        />
-
-        <input
-          type="number"
-          min="0"
-          max="100"
-          placeholder="Max discount %"
-          value={maxDiscount}
-          onChange={(e) => setMaxDiscount(e.target.value)}
           style={{ background: "var(--bg-input)", color: "var(--text-primary)", borderColor: "var(--border-subtle)", width: 130 }}
         />
 
@@ -940,13 +908,16 @@ function Dashboard() {
                       <div><span className="field-label" style={{ fontSize: 11 }}>EMD deadline</span><div style={{ fontWeight: 500 }}>{dateLabel(property.emd_deadline)}</div></div>
                       <div><span className="field-label" style={{ fontSize: 11 }}>Inspection</span><div style={{ fontWeight: 500 }}>{property.inspection_start || property.inspection_end ? `${dateLabel(property.inspection_start)} – ${dateLabel(property.inspection_end)}` : "Not specified"}</div></div>
                     </div>
-                    {property.discount_percentage != null && <div style={{ color: "var(--accent-emerald)", fontSize: 13, fontWeight: 700 }}>Estimated {property.discount_percentage.toFixed(0)}% below comparable market value</div>}
+                    {property.reserve_price_per_sqft != null && (
+                      <div style={{ color: "var(--accent-blue, #0095f6)", fontSize: 13, fontWeight: 600 }}>
+                        Rate: ₹{property.reserve_price_per_sqft.toLocaleString()}/sq ft
+                      </div>
+                    )}
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: "auto", paddingTop: 8 }}>
                       <Link to={`/properties/${property.id}`} style={{ flex: 1, minWidth: 130, textAlign: "center", textDecoration: "none", padding: "10px 12px", borderRadius: 7, background: "var(--accent-blue, #0095f6)", color: "#fff", fontWeight: 700, fontSize: 13 }}>View property</Link>
                       <button type="button" onClick={() => openAnalyst(property.id, property.address)} style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid var(--border-subtle)", background: "transparent", color: "var(--text-primary)", cursor: "pointer" }}>Ask analyst</button>
                       {officialUrl && <a href={officialUrl} target="_blank" rel="noreferrer" style={{ padding: "10px 12px", borderRadius: 7, border: "1px solid var(--border-subtle)", color: "var(--accent-blue, #0095f6)", textDecoration: "none", fontSize: 13, fontWeight: 600 }}>Source listing</a>}
                     </div>
-                    {property.estimated_value != null && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Our estimated market value: {money(property.estimated_value)} · Not a bank-verified figure</div>}
                   </div>
                 </article>
               );

@@ -19,51 +19,54 @@ def build_property_analysis_prompt(
     """
 
     instructions = """
-You are a foreclosure investment analysis assistant.
+You are an expert real estate underwriter and legal auction analyst.
+Analyze the provided auction notice particulars, deterministic financial calculations, and legal findings.
 
-Analyze the property using only the information provided
-in the property data and deterministic analysis.
+CRITICAL UNDERWRITING INSTRUCTIONS:
+1. Clearly distinguish between:
+   - Facts explicitly stated in the source document.
+   - Values calculated by the application (EMD %, Reserve Price / Sq Ft).
+   - Potential risks or inferences identified by the AI.
+2. Never manufacture information when the document does not provide it.
+3. Market valuation is unavailable when verified transaction data is not present — do not guess market values or discounts.
+4. Distinguish between physical possession (bank has custody) and symbolic possession (borrower/occupants may still occupy under Section 13(4) SARFAESI).
 
-Do not invent facts, values, comparable properties,
-financial figures, or legal conclusions.
-
-If important information is missing, explicitly say so.
-
-Your analysis should help an investor understand the
-potential opportunity, risks, and recommended due diligence.
-
-The response must provide all of these fields:
-- summary: a concise overall interpretation
-- strengths: important positive factors
-- risks: important risks or uncertainties
-- due_diligence: specific checks an investor should perform
-- recommendation: a clear investment-oriented recommendation based only on the supplied data
-
-Every field must contain meaningful content.
-Do not leave any field empty.
+Output a valid JSON object matching this schema:
+{
+    "summary": "Concise 2-3 sentence overview of property, bank, reserve price, and key assessment",
+    "strengths": ["Documented property or auction advantages (e.g. physical possession, clear title)"],
+    "risks": ["Explicitly disclosed concerns, pending litigation, or unquantified obligations"],
+    "due_diligence": ["Specific verification steps and questions the buyer must ask the bank"],
+    "recommendation": "Objective underwriting assessment grounded strictly in available facts"
+}
 """
 
     property_context = f"""
-PROPERTY DATA
+PROPERTY & AUCTION PARTICULARS
 
 Address: {property_data.get("address")}
 Property type: {property_data.get("property_type")}
-Price: {property_data.get("price")}
-Bedrooms: {property_data.get("bedrooms")}
-Bathrooms: {property_data.get("bathrooms")}
+Survey number: {property_data.get("survey_number")}
 Area (sqft): {property_data.get("area_sqft")}
 Auction date: {property_data.get("auction_date")}
 Foreclosure status: {property_data.get("foreclosure_status")}
-Opening bid: {property_data.get("opening_bid")}
-Estimated value: {property_data.get("estimated_value")}
+Reserve price: {property_data.get("reserve_price")}
+EMD: {property_data.get("emd")}
 """
 
     analysis_context = f"""
-DETERMINISTIC ANALYSIS
+DETERMINISTIC AUCTION INTELLIGENCE
 
-Discount percentage: {analysis_data.get("discount_percentage")}
-Risk level: {analysis_data.get("risk_level")}
-Deal score: {analysis_data.get("deal_score")}
+Assessment label: {analysis_data.get("assessment_label")}
+EMD percentage: {analysis_data.get("emd_percentage")}%
+Reserve price / sqft: {analysis_data.get("reserve_price_per_sqft")}
+Possession type: {analysis_data.get("possession_type")}
+Disclosed dues: {analysis_data.get("disclosed_outstanding_dues")}
+Disclosed encumbrances: {analysis_data.get("disclosed_encumbrances")}
+Pending litigation: {analysis_data.get("pending_litigation")}
+Important concerns: {analysis_data.get("important_concerns")}
+Missing information: {analysis_data.get("missing_information")}
+Market valuation status: {analysis_data.get("market_valuation_status")}
 """
 
     return f"""
@@ -271,59 +274,61 @@ def deterministic_property_ai_fallback(
     Guarantees 0% hallucination on missing data and high system reliability.
     """
     addr = property_data.get("address") or "Foreclosure Property"
-    deal_score = analysis_data.get("deal_score")
-    discount = analysis_data.get("discount_percentage")
-    risk_level = analysis_data.get("risk_level", 2)
+    assessment_label = analysis_data.get("assessment_label") or "Further investigation required"
     reserve = property_data.get("reserve_price") or property_data.get("opening_bid")
-    est_val = property_data.get("estimated_value")
+    emd = property_data.get("emd")
+    emd_pct = analysis_data.get("emd_percentage")
+    possession_type = (analysis_data.get("possession_type") or "not specified").lower()
+    important_concerns = analysis_data.get("important_concerns") or []
+    missing_info = analysis_data.get("missing_information") or []
 
     strengths = []
     risks = []
     due_diligence = []
 
-    if discount is not None and discount > 0:
-        strengths.append(f"Priced at {discount:.1f}% discount relative to market benchmark")
-    if deal_score is not None and deal_score >= 60:
-        strengths.append(f"Strong overall deal score ({deal_score:.0f}/100) based on financial metrics")
+    if "physical" in possession_type:
+        strengths.append("Bank holds physical custody of the secured property")
+    elif "symbolic" in possession_type:
+        risks.append("Symbolic possession under Section 13(4) SARFAESI; physical handover may require Section 14 DM order")
+    else:
+        risks.append("Possession type not specified in notice — verify whether bank has physical custody")
+
     if property_data.get("foreclosure_status") in ("scheduled", "upcoming", "active"):
         strengths.append(f"Active auction listing with scheduled auction date: {property_data.get('auction_date') or 'TBD'}")
     if not strengths:
-        strengths.append("Public auction property with verified SARFAESI publication record")
+        strengths.append("Public auction listing with verified SARFAESI publication particulars")
 
-    if est_val is None:
-        risks.append("Independent market valuation currently unavailable; reserve price lacks external comparable validation")
-        due_diligence.append("Commission an independent property valuation before participating in auction")
-    if risk_level >= 3:
-        risks.append("Elevated risk profile based on foreclosure status and legal timeline")
-    if property_data.get("foreclosure_status") in ("sold", "cancelled"):
-        risks.append(f"Auction is currently marked as {property_data.get('foreclosure_status')}")
+    for concern in important_concerns:
+        risks.append(f"Important concern: {concern}")
+    for missing in missing_info:
+        risks.append(f"Missing information: {missing}")
     if not risks:
-        risks.append("General foreclosure risks: potential unrecorded liens, encumbrances, or symbolic possession")
+        risks.append("General foreclosure risks: potential unrecorded liens, encumbrances, or municipal dues")
 
     due_diligence.append("Verify physical vs symbolic possession under SARFAESI Section 13(4) and Section 14")
-    due_diligence.append("Inspect encumbrance certificate (EC) for 30 years and verify outstanding municipal taxes/utility dues")
+    due_diligence.append("Inspect 30-year Encumbrance Certificate (EC) and verify pending municipal/society dues")
     due_diligence.append("Confirm EMD submission deadline and original title deed availability with authorized bank officer")
 
-    if deal_score is not None and deal_score >= 70:
-        recommendation = f"Favorable opportunity with deal score {deal_score:.0f}/100. Proceed with physical site inspection and title verification."
-    elif deal_score is not None and deal_score >= 40:
-        recommendation = f"Mixed investment prospect ({deal_score:.0f}/100). Proceed with caution only after validating market valuation and statutory dues."
+    if assessment_label == "No major concerns identified in the available documents":
+        recommendation = "Documentation and physical possession appear clean. Proceed with physical site inspection and title verification."
+    elif assessment_label == "Important risks identified":
+        recommendation = "Important legal or property risks identified in available documents. Detailed title search and legal consultation strictly recommended."
+    elif assessment_label == "Insufficient information":
+        recommendation = "Key auction or property parameters are missing. Clarification from bank officer strictly required before participation."
     else:
-        recommendation = "High risk or incomplete data. Comprehensive legal and market due diligence strictly required before bidding."
+        recommendation = "Further investigation required on possession status, title deeds, and pending statutory liabilities before bidding."
 
-    summary = f"Foreclosure investment evaluation for {addr}. "
+    summary = f"Auction intelligence evaluation for {addr}. Assessment label: {assessment_label}. "
     if reserve:
         try:
             summary += f"Reserve price: ₹{float(reserve):,.0f}. "
         except (ValueError, TypeError):
             summary += f"Reserve price: {reserve}. "
-    if deal_score is not None:
-        summary += f"Deterministic deal score: {deal_score:.0f}/100 with risk level {risk_level}."
-    else:
-        summary += "Deterministic scoring pending market comparables."
+    if emd and emd_pct:
+        summary += f"EMD: ₹{float(emd):,.0f} ({emd_pct:.1f}%). "
 
     return PropertyAIAnalysis(
-        summary=summary,
+        summary=summary.strip(),
         strengths=strengths,
         risks=risks,
         due_diligence=due_diligence,

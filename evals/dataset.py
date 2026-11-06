@@ -38,11 +38,10 @@ EVAL_DATASET: list[EvalSample] = [
         category="valuation_reasoning",
         question="How was the property value calculated?",
         property_id=1,
-        ground_truth_answer="The property valuation is determined using comparable sales in Gurdaspur, calculating an automated estimate with confidence metrics based on registrar transactions.",
+        ground_truth_answer="Market valuation is unavailable because verified comparable transaction data is not available. The published reserve price is ₹2,500,000.",
         required_facts=[
-            "comparable",
-            "market value",
-            "gurdaspur",
+            "market valuation unavailable",
+            "reserve price",
         ],
         forbidden_hallucinations=[
             "broker quote",
@@ -50,16 +49,16 @@ EVAL_DATASET: list[EvalSample] = [
             "unsupported estimate",
         ],
         expected_intent="valuation_explanation",
-        expected_citations=["comparable", "valuation"],
+        expected_citations=["property"],
     ),
     EvalSample(
         id="eval_val_02",
         category="valuation_reasoning",
         question="What is the reserve price, and how does it compare with the estimated market value?",
         property_id=1,
-        ground_truth_answer="The reserve price is Rs. 25,00,000, compared against the automated comparable-based market estimate.",
+        ground_truth_answer="The reserve price is ₹2,500,000, and market valuation is unavailable without verified comparable transaction data.",
         required_facts=[
-            "25,00,000",
+            "2,500,000",
             "reserve price",
         ],
         forbidden_hallucinations=[
@@ -67,7 +66,7 @@ EVAL_DATASET: list[EvalSample] = [
             "arbitrary discount",
         ],
         expected_intent="valuation_explanation",
-        expected_citations=["property", "valuation"],
+        expected_citations=["property"],
     ),
 
     # 2. Financial Extraction (Reserve Price, EMD, Auction Date)
