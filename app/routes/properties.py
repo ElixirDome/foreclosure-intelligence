@@ -79,6 +79,7 @@ def get_properties_route(
     city: str | None = Query(None),
     district: str | None = Query(None),
     locality: str | None = Query(None),
+    include_expired: bool = Query(False, description="Include expired or past auctions"),
 ):
     
     if foreclosure_status:
@@ -87,7 +88,7 @@ def get_properties_route(
     else:
         foreclosure_status = None
 
-    cache_key = f"property:list:{page}:{limit}:{sort_by}:{order}:{search}:{min_price}:{max_price}:{bedrooms}:{property_type}:{city}:{district}:{locality}:{min_area}:{max_area}:{min_discount}:{max_discount}:{foreclosure_status}:{auction_date_from}:{auction_date_to}"
+    cache_key = f"property:list:{page}:{limit}:{sort_by}:{order}:{search}:{min_price}:{max_price}:{bedrooms}:{property_type}:{city}:{district}:{locality}:{min_area}:{max_area}:{min_discount}:{max_discount}:{foreclosure_status}:{auction_date_from}:{auction_date_to}:{include_expired}"
     from app.services.cache import cache
     cached_list = cache.get(cache_key)
     if cached_list is not None:
@@ -115,6 +116,7 @@ def get_properties_route(
             city=city,
             district=district,
             locality=locality,
+            include_expired=include_expired,
         )
         cache.set(cache_key, result, ttl=30.0)
         return result

@@ -421,7 +421,11 @@ function Dashboard() {
 
             if (
               curStory === "live" &&
-              !(newProp.foreclosure_status === "scheduled" || newProp.foreclosure_status === "active")
+              !(
+                newProp.foreclosure_status === "scheduled" ||
+                newProp.foreclosure_status === "active" ||
+                newProp.foreclosure_status === "upcoming"
+              )
             ) {
               matches = false;
             }
@@ -558,7 +562,8 @@ function Dashboard() {
       return favorites.includes(prop.id);
     }
     if (activeStory === "live") {
-      return prop.foreclosure_status === "scheduled" || prop.foreclosure_status === "active";
+      const st = (prop.foreclosure_status || "").toLowerCase();
+      return st === "scheduled" || st === "active" || st === "upcoming";
     }
     if (activeStory === "physical") {
       return prop.possession_type?.toLowerCase().includes("physical");
@@ -736,8 +741,8 @@ function Dashboard() {
           <strong className="banknet-kpi-val" style={{ color: "var(--accent-amber)" }}>{summary.upcoming_auctions}</strong>
         </div>
         <div className="banknet-kpi-card" style={{ background: "var(--bg-card)", borderColor: "var(--border-subtle)" }}>
-          <span className="banknet-kpi-label" style={{ color: "var(--text-muted)" }}>Value Deals</span>
-          <strong className="banknet-kpi-val" style={{ color: "var(--accent-emerald)" }}>{summary.properties_with_estimates}</strong>
+          <span className="banknet-kpi-label" style={{ color: "var(--text-muted)" }}>Active Opportunities</span>
+          <strong className="banknet-kpi-val" style={{ color: "var(--accent-emerald)" }}>{summary.upcoming_auctions}</strong>
         </div>
         <div className="banknet-kpi-card" style={{ background: "var(--bg-card)", borderColor: "var(--border-subtle)" }}>
           <span className="banknet-kpi-label" style={{ color: "var(--text-muted)" }}>Residential</span>
@@ -884,7 +889,7 @@ function Dashboard() {
               const money = (value: number | null | undefined) => value == null ? "Not disclosed" : `₹${Number(value).toLocaleString("en-IN")}`;
               const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleString("en-IN", { dateStyle: "medium", ...(value.includes("T") ? { timeStyle: "short" as const } : {}) }) : "Not specified";
               return (
-                <article key={property.id} style={{ overflow: "hidden", border: "1px solid var(--border-subtle)", borderRadius: 14, background: "var(--bg-card)", color: "var(--text-primary)", display: "flex", flexDirection: "column", minWidth: 0 }}>
+                <article key={property.id} className="property-card" style={{ overflow: "hidden", border: "1px solid var(--border-subtle)", borderRadius: 14, background: "var(--bg-card)", color: "var(--text-primary)", display: "flex", flexDirection: "column", minWidth: 0 }}>
                   <div style={{ position: "relative", height: 220, background: "var(--bg-input)" }}>
                     {image ? <img src={image} alt={property.address} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", color: "var(--text-muted)", gap: 6 }}><span>Property image not provided by source</span></div>}
                     <span style={{ position: "absolute", top: 12, left: 12, background: "rgba(15,23,42,.88)", color: "#fff", padding: "5px 10px", borderRadius: 6, fontSize: 12, fontWeight: 700 }}>{property.foreclosure_status || "Status unavailable"}</span>

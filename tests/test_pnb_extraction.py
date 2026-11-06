@@ -124,7 +124,11 @@ def test_pnb_ocr_notice_extraction():
         assert flat["property_type"] == "Residential Property"
 
 
-def test_armb_pathankot_end_to_end_idempotency(db):
+def test_armb_pathankot_end_to_end_idempotency(db, monkeypatch):
+    import app.services.auction_date
+    monkeypatch.setattr(app.services.auction_date, "get_current_ist_date", lambda: date(2026, 10, 20))
+    monkeypatch.setattr("app.ingestion.save.get_current_ist_date", lambda: date(2026, 10, 20))
+
     from app.database import Base
     Base.metadata.create_all(bind=db.get_bind())
 
@@ -187,7 +191,12 @@ def test_armb_pathankot_end_to_end_idempotency(db):
     assert db.query(Evidence).count() == 3
 
 
-def test_armb_property_visible_via_api(client, db):
+def test_armb_property_visible_via_api(client, db, monkeypatch):
+    import app.services.auction_date
+    monkeypatch.setattr(app.services.auction_date, "get_current_ist_date", lambda: date(2026, 10, 20))
+    monkeypatch.setattr("app.ingestion.save.get_current_ist_date", lambda: date(2026, 10, 20))
+    monkeypatch.setattr("app.services.properties.get_current_ist_date", lambda: date(2026, 10, 20))
+
     sample_path = _get_armb_sample_path()
 
     if not sample_path.exists():

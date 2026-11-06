@@ -10,7 +10,7 @@ def test_build_property_analysis_prompt():
         "bedrooms": 3,
         "bathrooms": 2,
         "area_sqft": 1500,
-        "auction_date": "2026-08-22",
+        "auction_date": "2026-12-15",
         "foreclosure_status": "active",
         "reserve_price": 60000,
         "emd": 6000,

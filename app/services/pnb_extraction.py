@@ -1,9 +1,15 @@
 import re
 from datetime import datetime
+from app.services.auction_date import extract_latest_auction_date
 
 
 def _parse_date(text: str):
-    # 1. Prefer explicit auction date label
+    # 1. Use authoritative date intelligence distinguishing auction dates from notice/deed dates
+    verified_date = extract_latest_auction_date(text)
+    if verified_date:
+        return verified_date
+
+    # 2. Prefer explicit auction date label
     match = re.search(
         r"(?:Auction\s*Date|Date\s*(?:&|and|/)?\s*Time\s*of\s*(?:E-?)?Auction|Date\s*of\s*Auction)"
         r"\s*[:\-]?\s*(\d{2}[./-]\d{2}[./-]\d{4})",
@@ -11,17 +17,21 @@ def _parse_date(text: str):
         re.IGNORECASE,
     )
     if not match:
-        # 2. Date followed by auction hours (e.g. 27/10/2026 From 11AM or @11:00)
+        # 3. Date followed by auction hours (e.g. 27/10/2026 From 11AM or @11:00)
         match = re.search(
             r"(\d{2}[./-]\d{2}[./-]\d{4})\s*(?:From|@|Between|to)\s*\d{1,2}(?::\d{2})?\s*(?:AM|PM)",
             text,
             re.IGNORECASE,
         )
+
     if not match:
-        match = re.search(
-            r"(\d{2}[./-]\d{2}[./-]\d{4})",
-            text,
-        )
+        # 4. Fallback: match first date, but skip obvious non-auction dates (sale deeds, demand notices 13(2))
+        for m in re.finditer(r"(\d{2}[./-]\d{2}[./-]\d{4})", text):
+            prefix = text[max(0, m.start() - 40):m.start()].lower()
+            if any(bad in prefix for bad in ("sale deed", "deed no", "13(2)", "demand notice", "registered on")):
+                continue
+            match = m
+            break
 
     if not match:
         return None

@@ -27,7 +27,6 @@ PROPERTY_TYPE_COMMERCIAL = 2
 STATUS_FILTERS = (
     "upcoming",
     "live",
-    "completed",
 )
 
 AUCTION_STATUS_TO_FORECLOSURE = {

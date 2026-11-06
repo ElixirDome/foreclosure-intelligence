@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.ingestion.document_ingest import ingest_document
 from app.services.live_events import broker
+from app.services.auction_date import get_current_ist_date, is_auction_current
 from app.models import (
     Evidence,
     IngestionRun,
@@ -164,8 +165,23 @@ def save_ingested_properties(
             .first()
         )
 
+        today_ist = get_current_ist_date()
+
         if property_obj:
+            # Re-auction / Postponement: if an existing property is re-auctioned with a new future date,
+            # allow it to become an active opportunity again.
+            new_auction_date = property_data.get("auction_date")
+            new_auction_end = property_data.get("auction_end")
+            is_new_date_current = is_auction_current(new_auction_date, new_auction_end, today_ist)
+
             _reconcile_property_from_source(property_obj, property_data)
+
+            if is_new_date_current and (
+                property_obj.foreclosure_status in ("sold", "cancelled")
+                or (property_obj.auction_date and property_obj.auction_date < today_ist)
+            ):
+                property_obj.foreclosure_status = property_data.get("foreclosure_status") or "scheduled"
+
             skipped.append({
                 "property_id": property_obj.id,
                 "address": property_obj.address,
@@ -173,6 +189,31 @@ def save_ingested_properties(
             })
 
         else:
+            # Prevent creation of new active property listings from outdated/historical auction notices.
+            auction_date = property_data.get("auction_date")
+            auction_end = property_data.get("auction_end")
+            raw_status = (property_data.get("foreclosure_status") or "").lower()
+
+            is_past_date = (
+                (auction_date is not None and auction_date < today_ist)
+                or (auction_date is None and auction_end is not None and auction_end.date() < today_ist)
+            )
+
+            if is_past_date or raw_status in ("sold", "completed", "cancelled"):
+                # Do NOT create new active property listing.
+                # Ingest attached documents universally for internal search, RAG, and audit.
+                for document_data in documents:
+                    try:
+                        ingest_document(db, document_data, pages=item.get("pages"))
+                    except Exception as exc:
+                        failed_documents.append({"error": str(exc)})
+                skipped.append({
+                    "address": property_data.get("address"),
+                    "auction_date": str(auction_date),
+                    "reason": "historical_expired_auction_archived",
+                })
+                continue
+
             property_obj = Property(
                 user_id=user_id,
                 address=property_data["address"],

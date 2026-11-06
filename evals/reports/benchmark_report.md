@@ -1,6 +1,6 @@
 # LLM & RAG Evaluation Benchmark Report
 
-**Generated:** 2026-11-06T07:54:15.734065+00:00  
+**Generated:** 2026-11-06T08:43:08.790404+00:00  
 **Benchmark Suite:** Foreclosure Intelligence Production Eval Harness  
 **Sample Count:** 12 Curated Domain Queries
 
@@ -17,11 +17,11 @@
 | **Ranking Quality** | NDCG @ 5 | **0.969** | $\ge 0.850$ | ✅ Exceeds SLA |
 | **Safety & Truthfulness** | Hallucination Rate | **0.0%** | $< 2.0\%$ | ✅ Exceeds SLA |
 | **Negative Adherence** | Honest Refusal Rate | **100.0%** | $100.0\%$ | ✅ 100% Truthful |
-| **Performance SLA** | Latency (p95) | **20.93ms** | $< 250\text{ms}$ | ✅ Sub-200ms |
+| **Performance SLA** | Latency (p95) | **13.51ms** | $< 250\text{ms}$ | ✅ Sub-200ms |
 
 ## Latency Breakdown
 
-- **P50 Latency:** 5.46ms
-- **P95 Latency:** 20.93ms
-- **P99 Latency:** 26.05ms
-- **Mean Latency:** 7.7ms
+- **P50 Latency:** 3.45ms
+- **P95 Latency:** 13.51ms
+- **P99 Latency:** 15.36ms
+- **Mean Latency:** 4.97ms

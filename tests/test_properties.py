@@ -17,7 +17,7 @@ def _create_property(client, *, address="Test Property", **overrides):
         "bedrooms": 3,
         "bathrooms": 2,
         "area_sqft": 1500,
-        "auction_date": "2026-08-22",
+        "auction_date": "2026-12-15",
         "foreclosure_status": "active",
         "opening_bid": 60000,
         "reserve_price": 60000,

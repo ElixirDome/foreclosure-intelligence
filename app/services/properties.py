@@ -12,6 +12,7 @@ from app.services.llm import LLMProvider,generate_property_analysis
 from app.services.normalization import create_property_key
 
 from app.services.valuation import record_valuation
+from app.services.auction_date import get_current_ist_date
 
 from app.domain.auction_intelligence import (
     calculate_emd_percentage,
@@ -59,6 +60,7 @@ def save_extracted_properties(
 ):
     saved_properties = []
     skipped_properties = []
+    today_ist = get_current_ist_date()
 
     for extracted in properties:
 
@@ -75,12 +77,37 @@ def save_extracted_properties(
             .first()
         )
 
+        auction_date = (
+            extracted.auction_start.date()
+            if extracted.auction_start is not None
+            else None
+        )
+
         if existing_property:
-           
+            # Re-auction / Rescheduled: if the property has a new future auction date, reactivate it
+            if auction_date is not None and auction_date >= today_ist:
+                existing_property.auction_date = auction_date
+                existing_property.auction_start = extracted.auction_start
+                existing_property.auction_end = extracted.auction_end
+                existing_property.foreclosure_status = "scheduled"
+                if extracted.opening_bid is not None:
+                    existing_property.opening_bid = extracted.opening_bid
+                    existing_property.reserve_price = extracted.opening_bid
+                db.commit()
+
             skipped_properties.append({
                 "property_id": existing_property.id,
                 "address": existing_property.address,
                 "reason": "duplicate",
+            })
+            continue
+
+        # Prevent creation of new active property listings from outdated/historical auction notices
+        if auction_date is not None and auction_date < today_ist:
+            skipped_properties.append({
+                "address": extracted.address or "Unknown",
+                "auction_date": str(auction_date),
+                "reason": "historical_expired_auction_archived",
             })
             continue
 
@@ -96,11 +123,7 @@ def save_extracted_properties(
             opening_bid=extracted.opening_bid,
             property_type=extracted.property_type,
             survey_number=extracted.survey_number,
-            auction_date=(
-                extracted.auction_start.date()
-                if extracted.auction_start is not None
-                else None
-            ),
+            auction_date=auction_date,
             foreclosure_status="scheduled",
             property_key=property_key,
         )
@@ -139,6 +162,7 @@ def get_properties(
     city: str | None = None,
     district: str | None = None,
     locality: str | None = None,
+    include_expired: bool = False,
     **kwargs,
 ):
     """
@@ -179,17 +203,45 @@ def get_properties(
     if max_area is not None:
         query = query.filter(Property.area_sqft <= max_area)
 
-    # Foreclosure status
+    # Foreclosure status visibility rules:
+    # If caller specifies a status, filter to that exact status.
+    # Otherwise, hide sold and cancelled properties from active listings.
     if foreclosure_status is not None:
         query = query.filter(
             func.lower(Property.foreclosure_status)
             == foreclosure_status.lower()
         )
+    else:
+        query = query.filter(
+            or_(
+                Property.foreclosure_status.is_(None),
+                func.lower(Property.foreclosure_status).notin_(["sold", "cancelled"]),
+            )
+        )
 
-    # Auction date filters
+    # Auction date visibility rules:
+    # If explicit date bounds are passed, honour them.
+    # Otherwise, if include_expired is False, restrict to current/future actionable auctions.
+    today_ist = get_current_ist_date()
     if auction_date_from is not None:
         query = query.filter(
             Property.auction_date >= auction_date_from
+        )
+    elif not include_expired:
+        today_start = datetime.combine(today_ist, datetime.min.time())
+        query = query.filter(
+            or_(
+                Property.auction_date >= today_ist,
+                and_(
+                    Property.auction_date.is_(None),
+                    Property.auction_end.is_not(None),
+                    Property.auction_end >= today_start,
+                ),
+                and_(
+                    Property.auction_date.is_(None),
+                    Property.auction_end.is_(None),
+                ),
+            )
         )
 
     if auction_date_to is not None:
@@ -696,49 +748,35 @@ def analyze_property_with_ai(
     )
 
 def get_property_summary(db: Session):
+    today_ist = get_current_ist_date()
+    today_start = datetime.combine(today_ist, datetime.min.time())
+
+    active_condition = and_(
+        or_(
+            Property.foreclosure_status.is_(None),
+            func.lower(Property.foreclosure_status).notin_(["sold", "cancelled"]),
+        ),
+        or_(
+            Property.auction_date >= today_ist,
+            and_(
+                Property.auction_date.is_(None),
+                Property.auction_end.is_not(None),
+                Property.auction_end >= today_start,
+            ),
+            and_(
+                Property.auction_date.is_(None),
+                Property.auction_end.is_(None),
+            ),
+        ),
+    )
+
     total_properties = (
         db.query(func.count(Property.id)).scalar() or 0
     )
 
     upcoming_auctions = (
         db.query(func.count(Property.id))
-        .filter(
-            Property.auction_date >= date.today(),
-            Property.foreclosure_status.in_(
-                ["scheduled", "upcoming", "active"]
-            ),
-        )
-        .scalar()
-        or 0
-    )
-
-    latest_valuation_ids = (
-        db.query(
-            PropertyValuation.property_id,
-            func.max(PropertyValuation.id).label("latest_id"),
-        )
-        .filter(
-            PropertyValuation.source == "market_comparables",
-            PropertyValuation.valuation_method == "residential_comparable_sales",
-        )
-        .group_by(PropertyValuation.property_id)
-        .subquery()
-    )
-    properties_with_estimates = (
-        db.query(func.count(Property.id))
-        .join(
-            latest_valuation_ids,
-            latest_valuation_ids.c.property_id == Property.id,
-        )
-        .join(
-            PropertyValuation,
-            PropertyValuation.id == latest_valuation_ids.c.latest_id,
-        )
-        .filter(
-            Property.reserve_price.is_not(None),
-            PropertyValuation.estimated_value > 0,
-            Property.reserve_price < PropertyValuation.estimated_value,
-        )
+        .filter(active_condition)
         .scalar()
         or 0
     )
@@ -746,6 +784,7 @@ def get_property_summary(db: Session):
     residential = (
         db.query(func.count(Property.id))
         .filter(
+            active_condition,
             or_(
                 func.lower(Property.property_type).ilike("%residential%"),
                 func.lower(Property.property_type).ilike("%flat%"),
@@ -764,9 +803,11 @@ def get_property_summary(db: Session):
         .scalar()
         or 0
     )
+
     commercial = (
         db.query(func.count(Property.id))
         .filter(
+            active_condition,
             or_(
                 func.lower(Property.property_type).ilike("%commercial%"),
                 func.lower(Property.property_type).ilike("%industrial%"),
@@ -774,11 +815,12 @@ def get_property_summary(db: Session):
                 func.lower(Property.property_type).ilike("%office%"),
                 func.lower(Property.property_type).ilike("%factory%"),
                 func.lower(Property.property_type).ilike("%warehouse%"),
-            )
+            ),
         )
         .scalar()
         or 0
     )
+
     sold = (
         db.query(func.count(Property.id))
         .filter(func.lower(Property.foreclosure_status) == "sold")
@@ -789,7 +831,7 @@ def get_property_summary(db: Session):
     return {
         "total_properties": total_properties,
         "upcoming_auctions": upcoming_auctions,
-        "properties_with_estimates": properties_with_estimates,
+        "properties_with_estimates": 0,
         "residential": residential,
         "commercial": commercial,
         "sold": sold,
