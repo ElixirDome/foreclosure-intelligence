@@ -1,8 +1,9 @@
 """
-Deal intelligence layer.
+Auction intelligence adapter.
 
-Composes the shared comparable-based valuation engine with explainable
-foreclosure risk rules. It must not maintain a second valuation formula.
+Wraps build_auction_intelligence to provide transparent factor explanations,
+deterministic financial calculations, and descriptive assessments.
+Arbitrary numerical deal scores and unverified comparable valuations are removed.
 """
 
 from __future__ import annotations
@@ -11,12 +12,15 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
-from app.domain import deal_analysis as domain
-from app.models import Property
-from app.services.valuation import (
-    calculate_valuation_from_comparables,
-    find_comparables,
+from app.domain.auction_intelligence import (
+    MARKET_VALUATION_UNAVAILABLE_MESSAGE,
+    AuctionAssessment,
+    AuctionIntelligenceDetails,
+    AuctionIntelligenceResult,
+    FinancialIntelligence,
+    PropertyLegalIntelligence,
 )
+from app.services.auction_intelligence import build_auction_intelligence
 
 
 @dataclass
@@ -29,166 +33,128 @@ class DealFactor:
 @dataclass
 class DealIntelligence:
     property_id: int
-    deal_score: float | None
-    deal_rating: str | None
-    discount_amount: float | None
-    discount_percentage: float | None
-    price_per_sqft: float | None
-    risk_level: int
-    estimated_value: float | None
-    opening_bid: float | None
-    comparable_count: int
-    reserve_price: float | None = None
-    emd: float | None = None
+    assessment_label: str
+    reserve_price: float | None
+    emd: float | None
+    emd_percentage: float | None
+    property_area: float | None
+    reserve_price_per_sqft: float | None
+    disclosed_outstanding_dues: str | float | None
+    possession_type: str
+    auction_status: str | None
     factors: list[DealFactor] = field(default_factory=list)
     explanation: str = ""
+    financial: FinancialIntelligence | None = None
+    auction: AuctionIntelligenceDetails | None = None
+    legal: PropertyLegalIntelligence | None = None
+    assessment: AuctionAssessment | None = None
+
+    # Obsolete AVM fields removed / defaulted to None or unavailable indicator
+    deal_score: float | None = None
+    deal_rating: str | None = None
+    discount_amount: float | None = None
+    discount_percentage: float | None = None
+    price_per_sqft: float | None = None
+    risk_level: int = 1
+    estimated_value: float | None = None
+    opening_bid: float | None = None
+    comparable_count: int = 0
+    market_valuation_status: str = MARKET_VALUATION_UNAVAILABLE_MESSAGE
 
 
 def build_deal_intelligence(
     db: Session,
     property_id: int,
 ) -> DealIntelligence | None:
-    prop = db.query(Property).filter(Property.id == property_id).first()
-    if prop is None:
+    """Build transparent auction intelligence for a property."""
+    result = build_auction_intelligence(db, property_id)
+    if result is None:
         return None
 
-    reserve_price = (
-        float(prop.reserve_price)
-        if prop.reserve_price is not None
-        else None
-    )
-    opening_bid = (
-        float(prop.opening_bid)
-        if prop.opening_bid is not None
-        else None
-    )
-    emd = float(prop.emd) if prop.emd is not None else None
-
-    # Reuse the same eligibility filters and median-per-square-foot
-    # calculation used by the market-valuation endpoint. Never infer a
-    # value by guessing whether sale_price is a unit price or total price.
-    comparables = find_comparables(db=db, property_obj=prop)
-    valuation_result = None
-    if prop.area_sqft and prop.area_sqft > 0 and len(comparables) >= 3:
-        try:
-            valuation_result = calculate_valuation_from_comparables(
-                area_sqft=prop.area_sqft,
-                comparables=comparables,
-            )
-        except ValueError:
-            # Sparse or invalid evidence must result in no estimate, not
-            # a fallback to an arbitrary listing-entered number.
-            valuation_result = None
-
-    estimated = (
-        float(valuation_result["estimated_value"])
-        if valuation_result is not None
-        else None
-    )
-    confidence = (
-        float(valuation_result["confidence"])
-        if valuation_result is not None
-        else None
-    )
-    comparable_count = len(comparables)
-
-    discount_amount, discount_pct = domain.calculate_discount(
-        estimated,
-        reserve_price,
-    )
-    price_psf = domain.calculate_price_per_sqft(
-        reserve_price,
-        float(prop.area_sqft) if prop.area_sqft else None,
-    )
-    risk = domain.get_risk_level(prop.foreclosure_status)
-    base_score = domain.calculate_deal_score(discount_pct, risk)
-    score = domain.calculate_confidence_adjusted_score(base_score, confidence)
-    rating = domain.calculate_deal_rating(discount_pct)
-
     factors: list[DealFactor] = []
-    if discount_pct is not None and discount_pct >= 20:
-        factors.append(
-            DealFactor(
-                "+",
-                f"Reserve is {discount_pct:.1f}% below the comparable-based estimate",
-            )
-        )
-    elif discount_pct is not None and discount_pct < 5:
-        factors.append(
-            DealFactor(
-                "-",
-                f"Thin discount ({discount_pct:.1f}%) vs estimated value",
-            )
-        )
 
-    if valuation_result is not None:
+    # Financial factors
+    if result.financial.reserve_price is not None:
         factors.append(
             DealFactor(
-                "+",
-                f"{comparable_count} eligible local comparables support the estimate",
-            )
-        )
-    elif comparable_count:
-        factors.append(
-            DealFactor(
-                "-",
-                f"Only {comparable_count} eligible comparables; at least 3 valid matches are required",
+                "·",
+                f"Reserve price: ₹{result.financial.reserve_price:,.0f}",
             )
         )
     else:
-        factors.append(
-            DealFactor("-", "No eligible local comparables support a market estimate")
-        )
+        factors.append(DealFactor("-", "Reserve price was not disclosed in auction notice"))
 
-    if emd is None:
-        factors.append(DealFactor("-", "EMD was not found in structured auction data"))
-    if reserve_price is None:
-        factors.append(DealFactor("-", "Reserve price was not found in structured auction data"))
-
-    if risk <= 1:
-        factors.append(DealFactor("+", "Lower foreclosure process risk based on current status"))
-    elif risk >= 3:
+    if result.financial.emd is not None and result.financial.emd_percentage is not None:
         factors.append(
             DealFactor(
-                "-",
-                f"Higher process risk (status={prop.foreclosure_status})",
+                "·",
+                f"EMD: ₹{result.financial.emd:,.0f} ({result.financial.emd_percentage:.1f}% of reserve)",
             )
         )
 
-    if prop.foreclosure_status and prop.foreclosure_status.lower() in {
-        "sold",
-        "cancelled",
-    }:
+    if result.financial.reserve_price_per_sqft is not None:
         factors.append(
-            DealFactor("-", "Auction already concluded or cancelled")
+            DealFactor(
+                "·",
+                f"Reserve rate: ₹{result.financial.reserve_price_per_sqft:,.2f} per sq ft",
+            )
         )
 
-    lines = [
-        f"Deal score: {score:.0f}/100" if score is not None else "Deal score: n/a"
+    # Possession factors
+    pos_type = result.legal.possession_type.lower()
+    if "physical" in pos_type:
+        factors.append(DealFactor("+", "Bank has physical custody of the property"))
+    elif "symbolic" in pos_type:
+        factors.append(
+            DealFactor(
+                "-",
+                "Symbolic possession under Sec 13(4) SARFAESI — physical possession requires Sec 14 DM order",
+            )
+        )
+    else:
+        factors.append(DealFactor("-", "Possession status not specified in notice — verify with bank"))
+
+    # Legal / Encumbrances factors
+    for enc in result.legal.disclosed_encumbrances:
+        factors.append(DealFactor("-", f"Disclosed encumbrance: {enc}"))
+    for lit in result.legal.pending_litigation:
+        factors.append(DealFactor("-", f"Pending litigation: {lit}"))
+
+    # Assessment concerns
+    for concern in result.assessment.important_concerns:
+        if not any(f.label == concern for f in factors):
+            factors.append(DealFactor("-", concern))
+
+    # Market valuation note
+    factors.append(DealFactor("·", MARKET_VALUATION_UNAVAILABLE_MESSAGE))
+
+    explanation_lines = [
+        f"Auction Assessment: {result.assessment.assessment_label}",
+        f"Reserve Price: {f'₹{result.financial.reserve_price:,.0f}' if result.financial.reserve_price is not None else 'Undisclosed'}",
+        f"EMD: {f'₹{result.financial.emd:,.0f}' if result.financial.emd is not None else 'Undisclosed'}",
+        f"Possession: {result.legal.possession_type.capitalize()}",
+        f"Status: {result.auction.auction_status or 'Scheduled'}",
     ]
-    if rating:
-        lines.append(f"Rating: {rating}")
-    lines.append(f"Reserve price: {reserve_price if reserve_price is not None else 'not found'}")
-    lines.append(f"EMD: {emd if emd is not None else 'not found'}")
-    lines.append(
-        f"Comparable-based estimate: {estimated if estimated is not None else 'insufficient evidence'}"
-    )
     for factor in factors:
-        lines.append(f"{factor.direction} {factor.label}")
+        explanation_lines.append(f"{factor.direction} {factor.label}")
 
     return DealIntelligence(
         property_id=property_id,
-        deal_score=score,
-        deal_rating=rating,
-        discount_amount=discount_amount,
-        discount_percentage=discount_pct,
-        price_per_sqft=price_psf,
-        risk_level=risk,
-        estimated_value=estimated,
-        opening_bid=opening_bid,
-        comparable_count=comparable_count,
-        reserve_price=reserve_price,
-        emd=emd,
+        assessment_label=result.assessment.assessment_label,
+        reserve_price=result.financial.reserve_price,
+        emd=result.financial.emd,
+        emd_percentage=result.financial.emd_percentage,
+        property_area=result.financial.property_area,
+        reserve_price_per_sqft=result.financial.reserve_price_per_sqft,
+        disclosed_outstanding_dues=result.financial.disclosed_outstanding_dues,
+        possession_type=result.legal.possession_type,
+        auction_status=result.auction.auction_status,
         factors=factors,
-        explanation="\n".join(lines),
+        explanation="\n".join(explanation_lines),
+        financial=result.financial,
+        auction=result.auction,
+        legal=result.legal,
+        assessment=result.assessment,
+        price_per_sqft=result.financial.reserve_price_per_sqft,
+        market_valuation_status=MARKET_VALUATION_UNAVAILABLE_MESSAGE,
     )

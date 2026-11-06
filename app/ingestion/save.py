@@ -1,7 +1,11 @@
+import logging
+import time
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.ingestion.document_ingest import ingest_document
+from app.services.live_events import broker
+from app.services.auction_date import get_current_ist_date, is_auction_current
 from app.models import (
     Evidence,
     IngestionRun,
@@ -9,6 +13,8 @@ from app.models import (
     PropertyDocument,
 )
 from app.services.normalization import create_property_key
+
+logger = logging.getLogger(__name__)
 
 
 def _evidence_value(evidence):
@@ -78,6 +84,50 @@ def _reconcile_property_from_source(property_obj: Property, property_data: dict)
     if auction_date is not None:
         property_obj.auction_date = auction_date
 
+    increment_amount = property_data.get("increment_amount")
+    if increment_amount is not None:
+        property_obj.increment_amount = increment_amount
+
+    if property_data.get("auction_start") is not None:
+        property_obj.auction_start = property_data["auction_start"]
+
+    if property_data.get("auction_end") is not None:
+        property_obj.auction_end = property_data["auction_end"]
+
+    if property_data.get("possession_type"):
+        property_obj.possession_type = property_data["possession_type"]
+
+    if property_data.get("property_sub_type"):
+        property_obj.property_sub_type = property_data["property_sub_type"]
+
+    if property_data.get("district") and not property_obj.district:
+        property_obj.district = property_data["district"]
+
+    if property_data.get("state") and not property_obj.state:
+        property_obj.state = property_data["state"]
+
+    if property_data.get("pincode") and not property_obj.pincode:
+        property_obj.pincode = property_data["pincode"]
+
+    if property_data.get("bank_name") and not property_obj.bank_name:
+        property_obj.bank_name = property_data["bank_name"]
+
+    if property_data.get("branch_name") and not property_obj.branch_name:
+        property_obj.branch_name = property_data["branch_name"]
+
+    if property_data.get("raw_status"):
+        property_obj.raw_status = property_data["raw_status"]
+
+    for field in ("property_unique_id", "auction_id", "property_images", "inspection_start", "inspection_end", "emd_deadline", "listing_url"):
+        value = property_data.get(field)
+        if value not in (None, [], ""):
+            setattr(property_obj, field, value)
+
+    if property_data.get("extra_data"):
+        existing_extra = dict(property_obj.extra_data or {})
+        existing_extra.update(property_data["extra_data"])
+        property_obj.extra_data = existing_extra
+
 
 def save_ingested_properties(
     db: Session,
@@ -95,6 +145,7 @@ def save_ingested_properties(
     """
     saved = []
     skipped = []
+    failed_documents = []
 
     for item in properties:
         property_data = item["property"]
@@ -114,8 +165,23 @@ def save_ingested_properties(
             .first()
         )
 
+        today_ist = get_current_ist_date()
+
         if property_obj:
+            # Re-auction / Postponement: if an existing property is re-auctioned with a new future date,
+            # allow it to become an active opportunity again.
+            new_auction_date = property_data.get("auction_date")
+            new_auction_end = property_data.get("auction_end")
+            is_new_date_current = is_auction_current(new_auction_date, new_auction_end, today_ist)
+
             _reconcile_property_from_source(property_obj, property_data)
+
+            if is_new_date_current and (
+                property_obj.foreclosure_status in ("sold", "cancelled")
+                or (property_obj.auction_date and property_obj.auction_date < today_ist)
+            ):
+                property_obj.foreclosure_status = property_data.get("foreclosure_status") or "scheduled"
+
             skipped.append({
                 "property_id": property_obj.id,
                 "address": property_obj.address,
@@ -123,23 +189,67 @@ def save_ingested_properties(
             })
 
         else:
+            # Prevent creation of new active property listings from outdated/historical auction notices.
+            auction_date = property_data.get("auction_date")
+            auction_end = property_data.get("auction_end")
+            raw_status = (property_data.get("foreclosure_status") or "").lower()
+
+            is_past_date = (
+                (auction_date is not None and auction_date < today_ist)
+                or (auction_date is None and auction_end is not None and auction_end.date() < today_ist)
+            )
+
+            if is_past_date or raw_status in ("sold", "completed", "cancelled"):
+                # Do NOT create new active property listing.
+                # Ingest attached documents universally for internal search, RAG, and audit.
+                for document_data in documents:
+                    try:
+                        ingest_document(db, document_data, pages=item.get("pages"))
+                    except Exception as exc:
+                        failed_documents.append({"error": str(exc)})
+                skipped.append({
+                    "address": property_data.get("address"),
+                    "auction_date": str(auction_date),
+                    "reason": "historical_expired_auction_archived",
+                })
+                continue
+
             property_obj = Property(
                 user_id=user_id,
                 address=property_data["address"],
                 city=property_data.get("city"),
                 locality=property_data.get("locality"),
+                district=property_data.get("district"),
+                state=property_data.get("state"),
+                pincode=property_data.get("pincode"),
                 area_sqft=property_data.get("area_sqft"),
                 opening_bid=property_data.get("opening_bid"),
                 reserve_price=property_data.get("reserve_price"),
                 emd=property_data.get("emd"),
+                increment_amount=property_data.get("increment_amount"),
                 price=property_data.get("opening_bid"),
                 property_type=property_data.get("property_type"),
+                property_sub_type=property_data.get("property_sub_type"),
+                possession_type=property_data.get("possession_type"),
                 survey_number=property_data.get("survey_number"),
                 auction_date=property_data.get("auction_date"),
+                auction_start=property_data.get("auction_start"),
+                auction_end=property_data.get("auction_end"),
                 foreclosure_status=(
                     property_data.get("foreclosure_status") or "scheduled"
                 ),
+                raw_status=property_data.get("raw_status"),
+                bank_name=property_data.get("bank_name"),
+                branch_name=property_data.get("branch_name"),
+                property_unique_id=property_data.get("property_unique_id"),
+                auction_id=property_data.get("auction_id"),
+                property_images=property_data.get("property_images"),
+                inspection_start=property_data.get("inspection_start"),
+                inspection_end=property_data.get("inspection_end"),
+                emd_deadline=property_data.get("emd_deadline"),
+                listing_url=property_data.get("listing_url"),
                 property_key=property_key,
+                extra_data=property_data.get("extra_data"),
             )
 
             try:
@@ -167,79 +277,109 @@ def save_ingested_properties(
 
         for document_data in documents:
             payload = _normalize_document_payload(document_data)
-            pages = item.get("pages")
+            try:
+                with db.begin_nested():
+                    # 1. Document-specific page association:
+                    # Check if document_data or payload has its own extracted pages
+                    doc_pages = None
+                    if isinstance(document_data, dict):
+                        doc_pages = document_data.get("pages")
+                    elif hasattr(document_data, "pages"):
+                        doc_pages = getattr(document_data, "pages", None)
 
-            ingest_result = ingest_document(
-                db,
-                payload,
-                pages=pages,
-            )
-            document = ingest_result["document"]
+                    if not doc_pages and isinstance(payload, dict):
+                        doc_pages = payload.get("pages")
 
-            existing_relationship = (
-                db.query(PropertyDocument)
-                .filter(
-                    PropertyDocument.property_id == property_obj.id,
-                    PropertyDocument.document_id == document.id,
-                )
-                .first()
-            )
+                    # Only reuse item pages if this is a single 1-to-1 document association
+                    if not doc_pages and len(documents) == 1 and item.get("pages"):
+                        doc_pages = item.get("pages")
 
-            if not existing_relationship:
-                property_document = PropertyDocument(
-                    property_id=property_obj.id,
-                    document_id=document.id,
-                    relationship_type=payload.get(
-                        "document_type",
-                        document.document_type,
-                    ),
-                )
-                try:
-                    with db.begin_nested():
-                        db.add(property_document)
-                        db.flush()
-                except IntegrityError:
-                    # The unique (property_id, document_id) constraint is the
-                    # final guard if concurrent workers attach the same doc.
-                    pass
-
-            # Evidence belongs to the property + document.
-            for raw_evidence in evidence_items:
-                evidence_data = _evidence_value(raw_evidence)
-
-                existing_evidence = (
-                    db.query(Evidence)
-                    .filter(
-                        Evidence.property_id == property_obj.id,
-                        Evidence.document_id == document.id,
-                        Evidence.field == evidence_data["field"],
-                        Evidence.value == str(evidence_data["value"]),
-                        Evidence.page_number
-                        == evidence_data.get("page_number"),
+                    ingest_result = ingest_document(
+                        db,
+                        payload,
+                        pages=doc_pages,
                     )
-                    .first()
-                )
+                    document = ingest_result["document"]
 
-                if existing_evidence:
-                    continue
-
-                db.add(
-                    Evidence(
-                        property_id=property_obj.id,
-                        document_id=document.id,
-                        document_chunk_id=evidence_data.get(
-                            "document_chunk_id"
-                        ),
-                        field=evidence_data["field"],
-                        value=str(evidence_data["value"]),
-                        page_number=evidence_data.get("page_number"),
-                        source_text=evidence_data.get("source_text"),
-                        extraction_method=evidence_data.get(
-                            "extraction_method"
-                        ),
-                        confidence=evidence_data.get("confidence"),
+                    existing_relationship = (
+                        db.query(PropertyDocument)
+                        .filter(
+                            PropertyDocument.property_id == property_obj.id,
+                            PropertyDocument.document_id == document.id,
+                        )
+                        .first()
                     )
+
+                    if not existing_relationship:
+                        property_document = PropertyDocument(
+                            property_id=property_obj.id,
+                            document_id=document.id,
+                            relationship_type=payload.get(
+                                "document_type",
+                                document.document_type,
+                            ),
+                        )
+                        try:
+                            with db.begin_nested():
+                                db.add(property_document)
+                                db.flush()
+                        except IntegrityError:
+                            # The unique (property_id, document_id) constraint is the
+                            # final guard if concurrent workers attach the same doc.
+                            pass
+
+                    # Evidence belongs to the property + document.
+                    for raw_evidence in evidence_items:
+                        evidence_data = _evidence_value(raw_evidence)
+
+                        existing_evidence = (
+                            db.query(Evidence)
+                            .filter(
+                                Evidence.property_id == property_obj.id,
+                                Evidence.document_id == document.id,
+                                Evidence.field == evidence_data["field"],
+                                Evidence.value == str(evidence_data["value"]),
+                                Evidence.page_number
+                                == evidence_data.get("page_number"),
+                            )
+                            .first()
+                        )
+
+                        if existing_evidence:
+                            continue
+
+                        db.add(
+                            Evidence(
+                                property_id=property_obj.id,
+                                document_id=document.id,
+                                document_chunk_id=evidence_data.get(
+                                    "document_chunk_id"
+                                ),
+                                field=evidence_data["field"],
+                                value=str(evidence_data["value"]),
+                                page_number=evidence_data.get("page_number"),
+                                source_text=evidence_data.get("source_text"),
+                                extraction_method=evidence_data.get(
+                                    "extraction_method"
+                                ),
+                                confidence=evidence_data.get("confidence"),
+                            )
+                        )
+            except Exception as exc:
+                doc_title = (
+                    (payload.get("title") or payload.get("source_url") or "unknown_doc")
+                    if "payload" in locals() and isinstance(payload, dict)
+                    else "unknown_doc"
                 )
+                logger.error(
+                    "Document ingestion failed for '%s' on Property #%s: %s",
+                    doc_title, property_obj.id, exc, exc_info=True,
+                )
+                failed_documents.append({
+                    "document": doc_title,
+                    "property_id": property_obj.id,
+                    "error": str(exc),
+                })
 
     ingestion_run = (
         db.query(IngestionRun)
@@ -253,11 +393,70 @@ def save_ingested_properties(
 
     db.commit()
 
+    if saved or skipped:
+        from app.services.cache import cache
+        cache.invalidate_prefix("property:")
+
+    # Emit real-time events strictly after successful database commit
+    now = time.time()
+    for prop in saved:
+        broker.publish(
+            "property_created",
+            {
+                "property_id": prop.id,
+                "action": "created",
+                "address": prop.address,
+                "city": prop.city,
+                "locality": prop.locality,
+                "property_type": prop.property_type,
+                "reserve_price": float(prop.reserve_price) if prop.reserve_price is not None else None,
+                "emd": float(prop.emd) if prop.emd is not None else None,
+                "opening_bid": float(prop.opening_bid) if prop.opening_bid is not None else None,
+                "auction_date": prop.auction_date.isoformat() if prop.auction_date else None,
+                "foreclosure_status": prop.foreclosure_status or "scheduled",
+                "survey_number": prop.survey_number,
+                "area_sqft": prop.area_sqft,
+                "ingestion_run_id": ingestion_run_id,
+                "timestamp": now,
+            },
+        )
+
+    for skip in skipped:
+        if skip.get("reason") in ("updated_existing_property", "concurrent_duplicate_upsert"):
+            prop_id = skip["property_id"]
+            prop = db.query(Property).filter(Property.id == prop_id).first()
+            if prop:
+                broker.publish(
+                    "property_updated",
+                    {
+                        "property_id": prop.id,
+                        "action": "updated",
+                        "address": prop.address,
+                        "city": prop.city,
+                        "locality": prop.locality,
+                        "property_type": prop.property_type,
+                        "reserve_price": float(prop.reserve_price) if prop.reserve_price is not None else None,
+                        "emd": float(prop.emd) if prop.emd is not None else None,
+                        "opening_bid": float(prop.opening_bid) if prop.opening_bid is not None else None,
+                        "auction_date": prop.auction_date.isoformat() if prop.auction_date else None,
+                        "foreclosure_status": prop.foreclosure_status or "scheduled",
+                        "survey_number": prop.survey_number,
+                        "area_sqft": prop.area_sqft,
+                        "ingestion_run_id": ingestion_run_id,
+                        "timestamp": now,
+                    },
+                )
+
     for property_obj in saved:
         db.refresh(property_obj)
+
+    if saved or any(s.get("reason") in ("updated_existing_property", "concurrent_duplicate_upsert") for s in skipped):
+        from app.services.cache import cache
+        cache.invalidate_prefix("property:")
 
     return {
         "saved": saved,
         "skipped": skipped,
+        "failed_documents": failed_documents,
     }
 

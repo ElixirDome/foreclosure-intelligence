@@ -1,6 +1,6 @@
-from pydantic import BaseModel,ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime, date
-from typing import Literal
+from typing import Any, Literal
 #Pydantic is a library for validating and shaping data — specifically, checking that Python objects (usually built from JSON) match a schema you define, and converting/rejecting them accordingly
 
 
@@ -26,6 +26,8 @@ class PropertyCreate(BaseModel):#inheriting from BaseModel means that Pydantic w
         "cancelled",
     ] | None = None  
     opening_bid: float | None = None
+    reserve_price: float | None = None
+    emd: float | None = None
     property_type: str | None = None
     survey_number: str | None = None
 
@@ -53,11 +55,33 @@ class PropertyResponse(BaseModel):
     opening_bid: float | None
     reserve_price: float | None = None
     emd: float | None = None
+    increment_amount: float | None = None
+    auction_start: datetime | None = None
+    auction_end: datetime | None = None
+    possession_type: str | None = None
+    property_sub_type: str | None = None
+    district: str | None = None
+    state: str | None = None
+    pincode: str | None = None
+    bank_name: str | None = None
+    branch_name: str | None = None
+    raw_status: str | None = None
+    property_unique_id: str | None = None
+    auction_id: str | None = None
+    property_images: list[str] | None = None
+    inspection_start: datetime | None = None
+    inspection_end: datetime | None = None
+    emd_deadline: datetime | None = None
+    listing_url: str | None = None
+    extra_data: dict[str, Any] | None = None
     estimated_value: float | None
     property_type: str | None
     survey_number: str | None = None
     discount_percentage: float | None = None
     deal_score: float | None = None
+    emd_percentage: float | None = None
+    reserve_price_per_sqft: float | None = None
+    market_valuation_status: str | None = None
     sources: list[PropertySourceInfo] = []
 
 class PropertyUpdate(BaseModel):
@@ -77,6 +101,8 @@ class PropertyUpdate(BaseModel):
         "cancelled",
     ] | None = None
     opening_bid: float | None=None
+    reserve_price: float | None = None
+    emd: float | None = None
     property_type: str | None=None
     survey_number: str | None = None
 class UserCreate(BaseModel):
@@ -105,18 +131,59 @@ class PropertyListResponse(BaseModel):
     pages: int
 
 class PropertyAnalysis(BaseModel):
-    estimated_value: float | None
-    opening_bid: float | None
-    reserve_price: float | None
-    emd: float | None
-    discount_amount: float | None
-    discount_percentage: float | None
-    price_per_sqft: float | None
-    potential_upside: float | None
-    risk_level: int | None
-    deal_rating: str | None
-    deal_score: float | None
-    valuation_confidence: float | None
+    # Financial Intelligence
+    reserve_price: float | None = None
+    emd: float | None = None
+    emd_percentage: float | None = None
+    area_sqft: int | float | None = None
+    reserve_price_per_sqft: float | None = None
+    disclosed_outstanding_dues: str | float | None = None
+    other_financial_obligations: list[str] = Field(default_factory=list)
+    market_valuation_status: str = "Market valuation unavailable — verified comparable transaction data is not available."
+
+    # Auction Intelligence
+    auction_date: date | None = None
+    auction_start: datetime | None = None
+    auction_end: datetime | None = None
+    emd_deadline: datetime | None = None
+    inspection_start: datetime | None = None
+    inspection_end: datetime | None = None
+    inspection_window: str | None = None
+    auction_status: str | None = None
+    bank_name: str | None = None
+    branch_name: str | None = None
+    contact_details: str | None = None
+    auction_platform: str | None = None
+
+    # Property & Legal Intelligence
+    possession_type: str | None = None
+    disclosed_encumbrances: list[str] = Field(default_factory=list)
+    pending_litigation: list[str] = Field(default_factory=list)
+    title_concerns: list[str] = Field(default_factory=list)
+    property_discrepancies: list[str] = Field(default_factory=list)
+    missing_documentation: list[str] = Field(default_factory=list)
+    bank_conditions: list[str] = Field(default_factory=list)
+
+    # Transparent Assessment
+    assessment_label: str = "Further investigation required"
+    important_concerns: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    financial_considerations: list[str] = Field(default_factory=list)
+    possession_concerns: list[str] = Field(default_factory=list)
+    procedural_considerations: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+    # Optional / Deprecated compatibility attributes
+    opening_bid: float | None = None
+    estimated_value: float | None = None
+    discount_amount: float | None = None
+    discount_percentage: float | None = None
+    price_per_sqft: float | None = None
+    potential_upside: float | None = None
+    risk_level: int | None = None
+    deal_rating: str | None = None
+    deal_score: float | None = None
+    valuation_confidence: float | None = None
 
 class PropertyAIAnalysis(BaseModel):
     summary: str
@@ -299,6 +366,7 @@ class RAGRequest(BaseModel):
     limit: int = 6
     # None = auto (investment questions / property_id → multi-source)
     multi_source: bool | None = None
+    conversation_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CitationResponse(BaseModel):
@@ -321,6 +389,7 @@ class StructuredAnalysisResponse(BaseModel):
     risks: list[str] = []
     due_diligence: list[str] = []
     recommendation: str = ""
+    assessment_label: str | None = None
     deal_score: float | None = None
     deal_rating: str | None = None
 
@@ -336,6 +405,7 @@ class RAGResponse(BaseModel):
     chunks_used: int
     method: str
     mode: str
+    llm_provider: str | None = None
 
 
 class InvestmentAnalysisRequest(BaseModel):
@@ -353,19 +423,29 @@ class DealFactorResponse(BaseModel):
 
 class DealIntelligenceResponse(BaseModel):
     property_id: int
-    deal_score: float | None
-    deal_rating: str | None
-    discount_amount: float | None
-    discount_percentage: float | None
-    price_per_sqft: float | None
-    risk_level: int
-    estimated_value: float | None
-    opening_bid: float | None
-    comparable_count: int
-    reserve_price: float | None
-    emd: float | None
-    factors: list[DealFactorResponse]
-    explanation: str
+    assessment_label: str
+    reserve_price: float | None = None
+    emd: float | None = None
+    emd_percentage: float | None = None
+    property_area: float | None = None
+    reserve_price_per_sqft: float | None = None
+    disclosed_outstanding_dues: str | float | None = None
+    possession_type: str = "not specified"
+    auction_status: str | None = None
+    factors: list[DealFactorResponse] = Field(default_factory=list)
+    explanation: str = ""
+    market_valuation_status: str = "Market valuation unavailable — verified comparable transaction data is not available."
+
+    # Deprecated fields defaulted for backward compatibility
+    deal_score: float | None = None
+    deal_rating: str | None = None
+    discount_amount: float | None = None
+    discount_percentage: float | None = None
+    price_per_sqft: float | None = None
+    risk_level: int = 1
+    estimated_value: float | None = None
+    opening_bid: float | None = None
+    comparable_count: int = 0
 
 
 class StructuredFieldEvidence(BaseModel):
@@ -385,4 +465,35 @@ class StructuredExtractionResponse(BaseModel):
     validation_errors: list[str]
     valid: bool
     method: str
+
+
+class UserPreferenceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int | None = None
+    user_id: int
+    state: str | None = None
+    district: str | None = None
+    city: str | None = None
+    locality: str | None = None
+    property_types: list[str] = ["residential"]
+    min_reserve_price: float | None = None
+    max_reserve_price: float | None = None
+    preferred_banks: list[str] = []
+    onboarding_completed: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class UserPreferenceUpdate(BaseModel):
+    state: str | None = None
+    district: str | None = None
+    city: str | None = None
+    locality: str | None = None
+    property_types: list[str] = ["residential"]
+    min_reserve_price: float | None = None
+    max_reserve_price: float | None = None
+    preferred_banks: list[str] = []
+    onboarding_completed: bool = True
+
 

@@ -27,7 +27,6 @@ PROPERTY_TYPE_COMMERCIAL = 2
 STATUS_FILTERS = (
     "upcoming",
     "live",
-    "completed",
 )
 
 AUCTION_STATUS_TO_FORECLOSURE = {
@@ -169,6 +168,29 @@ class BankNetSourceAdapter(SourceAdapter):
         return items
 
     @staticmethod
+    def _extract_page_meta(payload: Any) -> dict[str, Any]:
+        meta: dict[str, Any] = {}
+        if not isinstance(payload, dict):
+            return meta
+        data = payload.get("data")
+        if isinstance(data, dict):
+            meta["total"] = (
+                data.get("total")
+                or data.get("recordsTotal")
+                or data.get("totalRecords")
+                or data.get("recordsFiltered")
+            )
+            meta["total_pages"] = (
+                data.get("total_pages")
+                or data.get("totalPages")
+                or data.get("pages")
+            )
+        elif isinstance(data, list):
+            meta["total"] = len(data)
+            meta["total_pages"] = 1
+        return meta
+
+    @staticmethod
     def _extract_hits(payload: Any) -> list[dict]:
         if not isinstance(payload, dict):
             return []
@@ -190,6 +212,33 @@ class BankNetSourceAdapter(SourceAdapter):
             or id(source)
         )
 
+    @staticmethod
+    def _extract_image_urls(source: dict) -> list[str]:
+        """Normalize known BankNet photo fields; never fabricate image URLs."""
+        candidates = []
+        for key in ("propertyImages", "propertyImage", "propertyImageList", "imageUrls", "images", "propertyPhotos", "photoGallery", "imagePath", "imageUrl", "propertyPhoto"):
+            value = source.get(key)
+            if value:
+                candidates.extend(value if isinstance(value, list) else [value])
+        urls: list[str] = []
+        for item in candidates:
+            if isinstance(item, dict):
+                item = item.get("url") or item.get("imageUrl") or item.get("filepath") or item.get("filePath") or item.get("path") or item.get("src")
+            if not isinstance(item, str):
+                continue
+            value = item.strip()
+            if not value:
+                continue
+            if value.startswith("//"):
+                value = "https:" + value
+            elif not value.startswith(("https://", "http://")):
+                if ":" in value.split("/", 1)[0]:
+                    continue
+                value = f"{CDN_BASE}/{value.lstrip('/')}"
+            if value.startswith("https://") and value not in urls:
+                urls.append(value)
+        return urls[:12]
+
     def extract(self, item: dict) -> dict | None:
         source = item.get("_source") if isinstance(item, dict) else None
         if not isinstance(source, dict):
@@ -206,25 +255,52 @@ class BankNetSourceAdapter(SourceAdapter):
         if not address:
             return None
 
-        area = self._parse_area(source.get("carpetAreaSqft"))
-        if area is None:
-            area = self._parse_area(source.get("builtupAreaSqft"))
+        carpet_area = self._parse_area(source.get("carpetAreaSqft"))
+        builtup_area = self._parse_area(source.get("builtupAreaSqft"))
+        area = carpet_area if carpet_area is not None else builtup_area
 
-        reserve = source.get("reservePrice")
-        try:
-            opening_bid = float(reserve) if reserve is not None else None
-        except (TypeError, ValueError):
-            opening_bid = None
+        # Reserve price vs EMD vs increment - keep strictly distinct
+        reserve_price = None
+        if source.get("reservePrice") is not None:
+            try:
+                reserve_price = float(source["reservePrice"])
+            except (TypeError, ValueError):
+                reserve_price = None
 
-        auction_date = self._parse_date(
-            source.get("auctionFrom") or source.get("auctionTo")
+        emd = None
+        if source.get("emd") is not None:
+            try:
+                emd = float(source["emd"])
+            except (TypeError, ValueError):
+                emd = None
+
+        increment_amount = None
+        inc_raw = source.get("incrementPrice") or source.get("bidIncrement")
+        if inc_raw is not None:
+            try:
+                increment_amount = float(inc_raw)
+            except (TypeError, ValueError):
+                increment_amount = None
+
+        # Do NOT fabricate opening_bid from reservePrice
+        opening_bid = None
+        if source.get("openingBid") is not None:
+            try:
+                opening_bid = float(source["openingBid"])
+            except (TypeError, ValueError):
+                opening_bid = None
+
+        # Dates & Times
+        auction_start = self._parse_datetime(source.get("auctionFrom"))
+        auction_end = self._parse_datetime(source.get("auctionTo"))
+        auction_date = (
+            auction_start.date() if auction_start
+            else self._parse_date(source.get("auctionFrom") or source.get("auctionTo"))
         )
 
+        raw_status = source.get("auctionStatus")
         filter_status = item.get("_banknet_filter_status")
-        foreclosure = self._map_status(
-            source.get("auctionStatus"),
-            filter_status,
-        )
+        foreclosure = self._map_status(raw_status, filter_status)
 
         prop_type = source.get("propertyType")
         if isinstance(prop_type, str):
@@ -232,23 +308,69 @@ class BankNetSourceAdapter(SourceAdapter):
         else:
             prop_type = None
 
+        prop_sub_type = source.get("propertySubType")
+        if isinstance(prop_sub_type, str):
+            prop_sub_type = prop_sub_type.strip() or None
+        else:
+            prop_sub_type = None
+
         unique = source.get("propertyUniqueId")
+
+        inspection_start = self._parse_datetime(source.get("inspectionFrom"))
+        inspection_end = self._parse_datetime(source.get("inspectionTo"))
+        emd_deadline = self._parse_datetime(source.get("emdSubmissionDeadline"))
+        property_images = self._extract_image_urls(source)
+        property_detail_id = source.get("propertyDetailId")
+        listing_url = f"https://baanknet.com/view-property/{property_detail_id}" if property_detail_id else "https://baanknet.com/property-listing"
+        extra_data = {
+            "inspectionFrom": source.get("inspectionFrom"),
+            "inspectionTo": source.get("inspectionTo"),
+            "emdSubmissionDeadline": source.get("emdSubmissionDeadline"),
+            "propertyDetailId": property_detail_id,
+            "auctionId": source.get("auctionId"),
+            "propertyImages": property_images,
+            "propertyHeading": source.get("propertyHeading"),
+            "projectName": source.get("projectName"),
+            "furnishedStatus": source.get("furnishedStatus"),
+            "typeOfAction": source.get("typeOfAction"),
+            "branchAddress": source.get("branchAddress"),
+            "carpetAreaSqft": carpet_area,
+            "builtupAreaSqft": builtup_area,
+            "rawAuctionStatus": raw_status,
+        }
 
         return {
             "address": address[:2000],
             "city": (source.get("cityName") or None),
             "locality": (source.get("locality") or "").strip() or None,
+            "district": (source.get("districtName") or None),
+            "state": (source.get("stateName") or None),
+            "pincode": (str(source.get("pincode")).strip() if source.get("pincode") else None),
             "area_sqft": int(area) if area is not None else None,
             "opening_bid": opening_bid,
-            "reserve_price": opening_bid,
-            "property_type": prop_type,
-            "survey_number": str(unique) if unique else None,
+            "reserve_price": reserve_price,
+            "emd": emd,
+            "increment_amount": increment_amount,
+            "auction_start": auction_start,
+            "auction_end": auction_end,
             "auction_date": auction_date,
             "foreclosure_status": foreclosure,
+            "raw_status": str(raw_status) if raw_status is not None else None,
+            "property_type": prop_type,
+            "property_sub_type": prop_sub_type,
+            "possession_type": source.get("propertyPossessionType"),
+            "survey_number": str(unique) if unique else None,
             "bank_name": source.get("propertyBankName"),
-            "property_unique_id": unique,
-            "auction_id": source.get("auctionId"),
+            "branch_name": source.get("branchName"),
+            "property_unique_id": str(unique) if unique is not None else None,
+            "auction_id": str(source.get("auctionId")) if source.get("auctionId") is not None else None,
+            "property_images": property_images,
+            "inspection_start": inspection_start,
+            "inspection_end": inspection_end,
+            "emd_deadline": emd_deadline,
+            "listing_url": listing_url,
             "possession": source.get("propertyPossessionType"),
+            "extra_data": extra_data,
         }
 
     def get_documents(self, item: dict) -> list[SourceDocument]:
@@ -325,6 +447,8 @@ class BankNetSourceAdapter(SourceAdapter):
         evidence: list[dict] = []
         pairs = [
             ("reserve_price", source.get("reservePrice"), "reservePrice"),
+            ("emd", source.get("emd"), "emd"),
+            ("increment_amount", source.get("incrementPrice") or source.get("bidIncrement"), "incrementPrice"),
             ("address", source.get("address"), "address"),
             ("property_type", source.get("propertyType"), "propertyType"),
             ("auction_date", source.get("auctionFrom"), "auctionFrom"),
@@ -333,6 +457,8 @@ class BankNetSourceAdapter(SourceAdapter):
                 source.get("propertyPossessionType"),
                 "propertyPossessionType",
             ),
+            ("bank_name", source.get("propertyBankName"), "propertyBankName"),
+            ("branch_name", source.get("branchName"), "branchName"),
         ]
         for field, value, key in pairs:
             if value is None or value == "":
@@ -357,6 +483,21 @@ class BankNetSourceAdapter(SourceAdapter):
             return float(str(raw).replace(",", "").strip())
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _parse_datetime(raw: Any) -> datetime | None:
+        if not raw:
+            return None
+        text = str(raw).strip()
+        try:
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            return datetime.fromisoformat(text)
+        except ValueError:
+            try:
+                return datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return None
 
     @staticmethod
     def _parse_date(raw: Any) -> date | None:

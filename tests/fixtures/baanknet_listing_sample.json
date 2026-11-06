@@ -1,0 +1,51 @@
+{
+  "status": true,
+  "message": "Auction list fetched successfully",
+  "data": {
+    "total": 1,
+    "limit": 50,
+    "page": 1,
+    "total_pages": 1,
+    "data": [
+      {
+        "_index": "psba_auction_property",
+        "_id": "BK-2026-98124",
+        "_source": {
+          "propertyUniqueId": "BK-2026-98124",
+          "auctionId": 54321,
+          "propertyDetailId": 1098,
+          "propertyBankName": "Punjab National Bank",
+          "branchName": "Circle SASTRA Centre Pathankot",
+          "propertyHeading": "Residential Flat No. 204, Green Avenue",
+          "address": "Flat No. 204, 2nd Floor, Green Avenue, Defence Road, Pathankot",
+          "locality": "Defence Road",
+          "cityName": "Pathankot",
+          "districtName": "Gurdaspur",
+          "stateName": "Punjab",
+          "pincode": "145001",
+          "propertyType": "Residential",
+          "propertySubType": "Apartment / Flat",
+          "propertyPossessionType": "Physical",
+          "carpetAreaSqft": "1250",
+          "builtupAreaSqft": "1450",
+          "reservePrice": 3438000.0,
+          "emd": 344000.0,
+          "incrementPrice": 25000.0,
+          "auctionFrom": "2026-11-15T11:00:00Z",
+          "auctionTo": "2026-11-15T13:00:00Z",
+          "auctionStatus": "upcoming",
+          "inspectionFrom": "2026-11-05T10:00:00Z",
+          "inspectionTo": "2026-11-05T16:00:00Z",
+          "emdSubmissionDeadline": "2026-11-12T17:00:00Z",
+          "auctionDocuments": [
+            {
+              "filepath": "documents/pnb_notice_98124.pdf",
+              "filename": "sale_notice_98124.pdf",
+              "description": "Official Sale Notice under SARFAESI Act"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,1506 @@
+"""
+Unified Research Analyst Engine.
+
+Provides tool-assisted, evidence-backed conversational research for foreclosure
+properties, valuations, auction status, discovery, and source onboarding.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Any
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session
+
+from app.models import (
+    Document,
+    DocumentChunk,
+    Evidence,
+    MarketComparable,
+    Property,
+    PropertyDocument,
+    PropertyValuation,
+    UserPreference,
+)
+from app.services.deal_intelligence import build_deal_intelligence
+from app.services.query_understanding import (
+    CLARIFICATION_PROMPT,
+    GREETING_MESSAGE,
+    QueryIntent,
+    TERMINOLOGY_KNOWLEDGE,
+    classify_query,
+)
+from app.services.rag import Citation, RAGAnswer, StructuredAnalysis, answer_question
+
+
+@dataclass
+class AnalystResponse:
+    question: str
+    answer: str
+    property_id: int | None = None
+    citations: list[Citation] = field(default_factory=list)
+    structured: StructuredAnalysis | None = None
+    action_links: list[dict[str, str]] = field(default_factory=list)
+    intent: str = "general"
+    chunks_used: int = 0
+
+
+def process_analyst_turn(
+    db: Session,
+    question: str,
+    property_id: int | None = None,
+    user_id: int | None = None,
+    provider: Any | None = None,
+    conversation_history: list[dict[str, Any]] | None = None,
+    mode: str = "hybrid",
+    document_id: int | None = None,
+    limit: int = 6,
+    multi_source: bool | None = None,
+) -> AnalystResponse:
+    """Dispatches user query to specific domain tools or multi-source RAG."""
+    # Load user location preferences if available
+    user_pref = None
+    if user_id:
+        user_pref = db.query(UserPreference).filter(UserPreference.user_id == user_id).first()
+
+    u_result = classify_query(
+        question,
+        property_id=property_id,
+        db=db,
+        conversation_history=conversation_history,
+    )
+    q_clean = u_result.cleaned_query
+    q_lower = q_clean.lower()
+    resolved_prop_id = u_result.property_id
+
+    # 1. Ambiguous, empty, single-character, or gibberish input (never hit corpus/vector search)
+    if u_result.intent == QueryIntent.AMBIGUOUS_CLARIFICATION:
+        return AnalystResponse(
+            question=q_clean,
+            answer=u_result.clarification_message or CLARIFICATION_PROMPT,
+            property_id=resolved_prop_id,
+            citations=[],
+            structured=None,
+            action_links=u_result.action_links,
+            intent="ambiguous_clarification",
+        )
+
+    # 2. Conversational Greetings (never hit corpus)
+    if u_result.intent == QueryIntent.GREETING:
+        return AnalystResponse(
+            question=q_clean,
+            answer=u_result.direct_answer or GREETING_MESSAGE,
+            property_id=resolved_prop_id,
+            citations=[],
+            structured=None,
+            action_links=u_result.action_links,
+            intent="greeting",
+        )
+
+    # 3. Domain Terminology Education (authoritative legal definitions without notice search)
+    if u_result.intent == QueryIntent.TERMINOLOGY:
+        term_citation = []
+        for key, info in TERMINOLOGY_KNOWLEDGE.items():
+            if info["answer"] == u_result.direct_answer:
+                term_citation.append(
+                    Citation(
+                        kind="statute",
+                        source_id=f"statute:{key}",
+                        title=info["statute_title"],
+                        excerpt=info["citation"],
+                        score=1.0,
+                    )
+                )
+                break
+        return AnalystResponse(
+            question=q_clean,
+            answer=u_result.direct_answer or "",
+            property_id=None,
+            citations=term_citation,
+            action_links=u_result.action_links,
+            intent="terminology",
+        )
+
+    # 4. Confidential Banking & Settlement Refusal (Negative Constraint Adherence)
+    if u_result.intent == QueryIntent.CONFIDENTIAL_REFUSAL:
+        return AnalystResponse(
+            question=q_clean,
+            answer=(
+                "### Confidential Banking Records Notice\n\n"
+                "Private Settlement & OTS Records Are Not Public\n"
+                "One-Time Settlement (OTS) figures, borrower compromise arrangements, and private bank concessions are confidential.\n"
+                "Official SARFAESI auction notices state only the verified Reserve Price, Earnest Money Deposit (EMD), and Auction Date.\n"
+                "Foreclosure Intelligence strictly relies on published public auction records and refuses to speculate on non-public banking matters."
+            ),
+            property_id=resolved_prop_id,
+            citations=[
+                Citation(
+                    kind="system",
+                    source_id="sys:confidentiality",
+                    title="SARFAESI Public Disclosure Scope",
+                    excerpt="Under SARFAESI Security Interest Enforcement Rules, public notices state reserve price, EMD, and auction terms. Private borrower settlements and OTS compromises are confidential non-public banking matters.",
+                    score=1.0,
+                )
+            ],
+            intent="confidential_refusal",
+        )
+
+    # 5. Follow-Up Queries missing property context
+    if u_result.intent == QueryIntent.FOLLOW_UP:
+        return AnalystResponse(
+            question=q_clean,
+            answer=u_result.direct_answer or "",
+            property_id=None,
+            citations=[],
+            action_links=u_result.action_links,
+            intent="follow_up",
+        )
+
+    # 6. Onboarding & Source Connection Guidance
+    if u_result.intent == QueryIntent.ONBOARDING_GUIDE:
+        return _handle_source_onboarding_inquiry(q_clean, q_lower)
+
+    # 7. Bank Representative & Contact Inquiry
+    if u_result.intent == QueryIntent.REPRESENTATIVE_INQUIRY:
+        return _handle_representative_inquiry(db, resolved_prop_id, q_clean)
+
+    # 7b. Validity & Verification Audit
+    if u_result.intent == QueryIntent.VALIDITY_VERIFICATION:
+        return _handle_validity_verification(db, resolved_prop_id, q_clean)
+
+    # 8. Valuation calculation & Comparables explanation
+    if u_result.intent == QueryIntent.VALUATION_EXPLANATION:
+        return _handle_valuation_explanation(db, resolved_prop_id, q_clean)
+
+    # 9. Status, EMD, Reserve Price, and Auction Date inquiry
+    if u_result.intent == QueryIntent.STATUS_INQUIRY:
+        return _handle_status_inquiry(db, resolved_prop_id, q_clean)
+
+    # 10. Original Notice Document inquiry
+    if u_result.intent == QueryIntent.DOCUMENT_RETRIEVAL:
+        return _handle_original_document_inquiry(db, resolved_prop_id, q_clean)
+
+    # 10b. Property Deal & Underwriting Evaluation
+    if u_result.intent == QueryIntent.PROPERTY_DEAL_INQUIRY and resolved_prop_id:
+        return _handle_deal_inquiry(db, resolved_prop_id, q_clean)
+
+    # 10c. Property Possession & Occupancy
+    if u_result.intent == QueryIntent.PROPERTY_POSSESSION_INQUIRY and resolved_prop_id:
+        return _handle_possession_inquiry(db, resolved_prop_id, q_clean)
+
+    # 10d. Property Liens & Encumbrances
+    if u_result.intent == QueryIntent.PROPERTY_LIENS_INQUIRY and resolved_prop_id:
+        return _handle_liens_inquiry(db, resolved_prop_id, q_clean)
+
+    # 10e. Property Proper Address & Boundaries
+    if u_result.intent == QueryIntent.PROPERTY_ADDRESS_INQUIRY and resolved_prop_id:
+        return _handle_address_inquiry(db, resolved_prop_id, q_clean)
+
+    # 11. Inventory Discovery / Location-Aware Search
+    if u_result.intent == QueryIntent.INVENTORY_DISCOVERY:
+        return _handle_discovery_search(db, q_clean, q_lower, user_pref)
+
+    # 12. Fallback to Multi-Source RAG with Deal Intelligence
+    rag_result = answer_question(
+        db=db,
+        question=q_clean,
+        property_id=resolved_prop_id,
+        document_id=document_id,
+        mode=mode,
+        provider=provider,
+        limit=limit,
+        multi_source=multi_source,
+    )
+
+    action_links = []
+    if resolved_prop_id:
+        action_links.append({"title": f"View Property Details #{resolved_prop_id}", "url": f"/properties/{resolved_prop_id}"})
+        pdoc = db.query(PropertyDocument).filter(PropertyDocument.property_id == resolved_prop_id).first()
+        if pdoc:
+            action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{pdoc.document_id}/file"})
+
+    seen_citations = set()
+    deduped_citations = []
+    for c in rag_result.citations:
+        c_key = (c.kind, c.document_id, c.page_number, c.source_id)
+        if c_key not in seen_citations:
+            seen_citations.add(c_key)
+            deduped_citations.append(c)
+
+    return AnalystResponse(
+        question=q_clean,
+        answer=rag_result.answer,
+        property_id=resolved_prop_id,
+        citations=deduped_citations,
+        structured=rag_result.structured,
+        action_links=action_links,
+        intent="investment_analysis" if resolved_prop_id else "rag_general",
+        chunks_used=rag_result.chunks_used,
+    )
+
+
+def _handle_source_onboarding_inquiry(question: str, q_lower: str) -> AnalystResponse:
+    lines = [
+        "### Connecting Foreclosure & Auction Sources",
+        "",
+        "Foreclosure Intelligence autonomously crawls and monitors bank e-auction portals. Here is how to connect a source:",
+        "",
+        "1. Autonomous Discovery:",
+        "   Navigate to the Admin Import Desk (/admin/import).",
+        "   Enter the bank name (e.g. PNB, IBAPI, SBI) or root website address.",
+        "   The autonomous crawler inspects navigation menus, sitemaps, SARFAESI auction grids, and downloadable notices.",
+        "   Review the discovered endpoint and sample preview, then click Connect Source.",
+        "",
+        "2. Supported Auction Portals:",
+        "   Punjab National Bank (PNB): Direct listings at https://www.pnb.bank.in/EAuction.aspx.",
+        "   IBAPI (e-Bkray): Centralized portal for public sector banks at https://ibapi.in.",
+        "   Custom Bank Portals: Any public bank portal displaying SARFAESI auction tables or notice PDFs.",
+        "",
+        "3. What if endpoint discovery cannot locate listings?",
+        "   Some bank sites use dynamic JavaScript or Cloudflare bot checks.",
+        "   Solution: Open the bank site in your browser, click Tenders or E-Auctions / SARFAESI Notices, and copy the direct URL of the auction table or PDF view page.",
+        "   Paste that exact URL into the Admin Import Desk; our validator will immediately verify tabular headers and document links.",
+    ]
+
+    action_links = [
+        {"title": "Open Admin Source Connect Desk", "url": "/admin/import"},
+    ]
+
+    citations = [
+        Citation(
+            kind="system",
+            source_id="sys:onboarding",
+            title="Foreclosure Source Connector Guide",
+            excerpt="Supported Bank Portals: Punjab National Bank (PNB at https://www.pnb.bank.in/EAuction.aspx), IBAPI (e-Bkray at https://ibapi.in), Custom Bank Portals. Admin Import Desk route: /admin/import",
+            score=1.0,
+        )
+    ]
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        citations=citations,
+        action_links=action_links,
+        intent="onboarding_guide",
+    )
+
+
+def _extract_representative_from_text(text: str) -> dict[str, str | None]:
+    if not text:
+        return {}
+    res: dict[str, str | None] = {}
+
+    # 1. Officer Designation
+    m_officer = re.search(
+        r"(Authori[sz]ed\s+Of[f\uFB01\uFB02]+icer(?:\s*of\s*(?:the\s*)?Bank|\s*Punjab\s*National\s*Bank|[^,\n\(\)]{0,50})?)",
+        text,
+        re.IGNORECASE,
+    )
+    if m_officer:
+        off_str = re.sub(r"\s+", " ", m_officer.group(1)).strip()
+        if "officerofthebank" in off_str.lower():
+            off_str = "Authorised Officer of the Bank / Secured Creditor"
+        res["officer"] = off_str
+    else:
+        m_mgr = re.search(r"((?:Chief\s+Manager|Branch\s+Manager|Nodal\s+Officer|Recovery\s+Officer)[^\n,\(]{0,40})", text, re.IGNORECASE)
+        res["officer"] = re.sub(r"\s+", " ", m_mgr.group(1)).strip() if m_mgr else "Authorised Officer"
+
+    # 2. Branch / Asset Recovery Office
+    m_branch = re.search(
+        r"([A-Za-z0-9\s\-]+(?:ARMB|SAMB|Asset Recovery Management Branch)[^\n\(\)]*)",
+        text,
+        re.IGNORECASE,
+    )
+    if m_branch:
+        res["branch"] = re.sub(r"\s+", " ", m_branch.group(1)).strip()
+
+    # 3. Office Address
+    m_addr = re.search(r"\((Near[^\)]+?\d{6}[^\)]*)\)", text, re.IGNORECASE)
+    if not m_addr:
+        m_addr = re.search(r"([^\n]+(?:Saili Road|Civil Lines|Model Town|GT Road)[^\n]+)", text, re.IGNORECASE)
+    if m_addr:
+        res["address"] = re.sub(r"\s+", " ", m_addr.group(1)).strip()
+
+    # 4. Phone / Mobile
+    m_phone = re.search(
+        r"(?:\[?Phone(?:\s*No\.?)?\]?|Contact(?:\s*No\.?)?|Mobile(?:\s*No\.?)?|Tel\.?)\s*[:\-]?\s*([+0-9\s,\-/]{8,25})",
+        text,
+        re.IGNORECASE,
+    )
+    if m_phone:
+        res["phone"] = m_phone.group(1).strip()
+    else:
+        m_phone2 = re.search(r"\b(?:\+91[- ]?)?[6-9]\d{9}\b", text)
+        if m_phone2:
+            res["phone"] = m_phone2.group(0).strip()
+
+    # 5. Email
+    m_email = re.search(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", text, re.IGNORECASE)
+    if m_email:
+        res["email"] = m_email.group(1).strip()
+
+    # 6. Place & Date
+    m_place = re.search(r"PLACE\s*[:\-]?\s*([A-Za-z]+)", text, re.IGNORECASE)
+    m_date = re.search(r"DATE\s*[:\-]?\s*(\d{2}[./-]\d{2}[./-]\d{4})", text, re.IGNORECASE)
+    if m_place:
+        res["place"] = m_place.group(1).strip()
+    if m_date:
+        res["notice_date"] = m_date.group(1).strip()
+
+    return res
+
+
+def _handle_representative_inquiry(db: Session, property_id: int | None, question: str) -> AnalystResponse:
+    if property_id is None:
+        return AnalystResponse(
+            question=question,
+            answer=(
+                "### Bank Representative & Contact Inquiries\n\n"
+                "To look up the authorized officer or representative for a foreclosure auction, "
+                "please specify the property lot or open a property:\n"
+                "Example: Who is the representative for Lot #40?\n"
+                "Or click Ask Analyst on any property card from the dashboard."
+            ),
+            intent="representative_inquiry",
+            action_links=[{"title": "Open Dashboard", "url": "/dashboard"}],
+        )
+
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+            intent="representative_inquiry",
+        )
+
+    # Find associated notice document(s)
+    pdocs = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).all()
+    if not pdocs:
+        return AnalystResponse(
+            question=question,
+            answer=(
+                f"### Bank Representative for Lot #{prop.id}\n"
+                f"Property: {prop.address}\n\n"
+                f"Notice Document Missing\n"
+                f"No auction notice documents are currently linked to Property #{prop.id} on record.\n"
+                f"Recommendation: Contact the secured creditor directly or verify the auction listing in the Admin Import desk."
+            ),
+            property_id=property_id,
+            intent="representative_inquiry",
+            action_links=[{"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"}],
+        )
+
+    doc_ids = [pd.document_id for pd in pdocs]
+    docs = db.query(Document).filter(Document.id.in_(doc_ids)).all()
+
+    rep_info: dict[str, str | None] = {}
+    target_doc: Document | None = None
+    matching_chunk: DocumentChunk | None = None
+
+    for doc in docs:
+        chunks = (
+            db.query(DocumentChunk)
+            .filter(DocumentChunk.document_id == doc.id)
+            .order_by(DocumentChunk.chunk_index)
+            .all()
+        )
+        full_text = doc.extracted_text or ""
+        extracted = _extract_representative_from_text(full_text)
+        if extracted.get("phone") or extracted.get("email") or extracted.get("branch"):
+            rep_info = extracted
+            target_doc = doc
+            for chunk in chunks:
+                c_text = chunk.text.lower()
+                if (extracted.get("phone") and extracted["phone"] in chunk.text) or \
+                   (extracted.get("email") and extracted["email"] in chunk.text) or \
+                   ("armb" in c_text or "officer" in c_text):
+                    matching_chunk = chunk
+                    break
+            break
+
+    citations: list[Citation] = []
+    action_links = [
+        {"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"}
+    ]
+
+    if rep_info and target_doc:
+        bank_name = target_doc.source_name or "Punjab National Bank (PNB)"
+        lines = [
+            f"### Bank Representative & Officer Contacts: Lot #{prop.id}",
+            "",
+            f"Property: {prop.address} ({prop.city or 'General'})",
+            f"Secured Creditor: {bank_name}",
+            "",
+            "Representative Contacts:",
+            f"Official Designation: {rep_info.get('officer', 'Authorised Officer')}",
+            f"Branch / Office: {rep_info.get('branch', 'Asset Recovery Management Branch')}",
+            f"Office Address: {rep_info.get('address') or 'Refer to auction notice'}",
+            f"Contact Phone: {rep_info['phone'] if rep_info.get('phone') else 'Not stated in notice'}",
+            f"Email: {rep_info['email'] if rep_info.get('email') else 'Not stated in notice'}",
+        ]
+        if rep_info.get("notice_date") or rep_info.get("place"):
+            lines.append(f"Notice Origin: {rep_info.get('place', 'Headquarters')} (Notice Date: {rep_info.get('notice_date', 'On file')})")
+
+        lines.extend([
+            "",
+            "Source Notice:",
+            f"Official Notice: {target_doc.title} published by {target_doc.source_name} (Doc #{target_doc.id})",
+        ])
+
+        if target_doc.source_url:
+            lines.append(f"Portal Notice URL: {target_doc.source_url}")
+
+        citations.append(
+            Citation(
+                kind="document",
+                source_id=f"doc:{target_doc.id}:rep",
+                title=f"Bank Representative Notice: {target_doc.title}",
+                excerpt=(
+                    f"Authorized Officer / Contact: {rep_info.get('officer')} | "
+                    f"Branch: {rep_info.get('branch')} | "
+                    f"Phone: {rep_info.get('phone')} | "
+                    f"Email: {rep_info.get('email')} | "
+                    f"Address: {rep_info.get('address')}"
+                )[:400],
+                score=1.0,
+                document_id=target_doc.id,
+                chunk_id=matching_chunk.id if matching_chunk else None,
+                page_number=matching_chunk.page_number if matching_chunk else 1,
+                property_id=property_id,
+                filename=target_doc.filename,
+                source_name=target_doc.source_name,
+            )
+        )
+        action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{target_doc.id}/file"})
+
+        return AnalystResponse(
+            question=question,
+            answer="\n".join(lines),
+            property_id=property_id,
+            citations=citations,
+            action_links=action_links,
+            intent="representative_inquiry",
+        )
+    else:
+        ref_doc = docs[0] if docs else None
+        doc_title = ref_doc.title if ref_doc else "Auction Notice"
+        doc_id = ref_doc.id if ref_doc else None
+        bank_label = ref_doc.source_name if ref_doc else "Bank / Secured Creditor"
+
+        lines = [
+            f"### Bank Representative & Contact Inquiries for Lot #{prop.id}",
+            f"Property: {prop.address}",
+            "",
+            "Representative Contact Details Not Found in Notice",
+            f"The indexed auction notice ({doc_title}) does not list a direct designated authorized officer name, contact phone, or branch email for this property.",
+            f"Secured Creditor: {bank_label}",
+            "",
+            "Suggested Next Steps:",
+            "Review the full original auction notice PDF for unindexed fine print or addenda.",
+            "Inquire directly with the bank nearest regional asset recovery or SARFAESI branch.",
+        ]
+        if ref_doc:
+            citations.append(
+                Citation(
+                    kind="document",
+                    source_id=f"doc:{ref_doc.id}",
+                    title=f"Source Notice: {ref_doc.title}",
+                    excerpt="No direct representative phone number or email was extracted from this notice.",
+                    score=0.8,
+                    document_id=ref_doc.id,
+                    property_id=property_id,
+                    source_name=ref_doc.source_name,
+                )
+            )
+            action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{ref_doc.id}/file"})
+
+        return AnalystResponse(
+            question=question,
+            answer="\n".join(lines),
+            property_id=property_id,
+            citations=citations,
+            action_links=action_links,
+            intent="representative_inquiry",
+        )
+
+
+def _handle_valuation_explanation(db: Session, property_id: int, question: str) -> AnalystResponse:
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+        )
+
+    deal = build_deal_intelligence(db, property_id)
+
+    lines = [
+        f"### Valuation Breakdown for Lot #{prop.id}",
+        f"Address: {prop.address} ({prop.city or 'Unspecified City'})",
+        f"Asset Scope: {prop.property_type or 'Residential Property'} | Area: {prop.area_sqft or 'Unknown'} sq ft",
+        "",
+        "Valuation Status: Market valuation unavailable — verified comparable transaction data is not available.",
+        "",
+        f"Published Reserve Price: ₹{prop.reserve_price:,.0f}" if prop.reserve_price else "Published Reserve Price: Undisclosed",
+        f"Reserve Price per Sq.Ft.: ₹{deal.reserve_price_per_sqft:,.2f} / sq ft" if deal and deal.reserve_price_per_sqft else "Reserve Price per Sq.Ft.: Area not specified",
+        f"Earnest Money Deposit (EMD): ₹{prop.emd:,.0f} ({deal.emd_percentage:.1f}%)" if prop.emd and deal and deal.emd_percentage else "Earnest Money Deposit (EMD): Undisclosed",
+        "",
+        "Guideline: Foreclosure Intelligence does not manufacture arbitrary valuations or unverified discounts.",
+        "Prospective buyers must verify local registrar guideline values and conduct independent on-site appraisal before bidding.",
+    ]
+
+    citations = [
+        Citation(
+            kind="property",
+            source_id=f"prop:{prop.id}",
+            title=f"Property Listing #{prop.id}: {prop.address}",
+            excerpt=f"Address: {prop.address}, City: {prop.city or 'General'}, Reserve Price: ₹{prop.reserve_price or 0:,.0f}, Area: {prop.area_sqft} sqft, Type: {prop.property_type}. Market valuation unavailable — verified comparable transaction data is not available.",
+            score=1.0,
+            property_id=property_id,
+        )
+    ]
+
+    action_links = [
+        {"title": f"View Full Property File #{prop.id}", "url": f"/properties/{prop.id}"},
+    ]
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="valuation_explanation",
+    )
+
+
+def _handle_status_inquiry(db: Session, property_id: int, question: str) -> AnalystResponse:
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+        )
+
+    # Resolve source document if available
+    pdoc = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).first()
+    doc = db.query(Document).filter(Document.id == pdoc.document_id).first() if pdoc else None
+    bank_name = doc.source_name if doc else "Punjab National Bank (PNB)"
+
+    lines = [
+        f"### Auction Details: Lot #{prop.id}",
+        "",
+        f"Address: {prop.address}",
+        f"Location: {prop.city or 'Unspecified City'}{', ' + prop.locality if prop.locality else ''}",
+        "",
+        "Auction Parameters:",
+        f"Secured Creditor: {bank_name}",
+        f"Foreclosure Status: {prop.foreclosure_status or 'scheduled'}",
+        f"Auction Date: {prop.auction_date.strftime('%d %b %Y') if prop.auction_date else 'Not scheduled'}",
+        f"Reserve Price: {f'₹{prop.reserve_price:,.2f}' if prop.reserve_price else 'Missing / Not extracted'}",
+        f"Earnest Money Deposit (EMD): {f'₹{prop.emd:,.2f}' if prop.emd else 'Missing / Not extracted'}",
+        f"Revenue / Survey No: {prop.survey_number or 'Unspecified'}",
+    ]
+
+    citations = [
+        Citation(
+            kind="property",
+            source_id=f"prop:{prop.id}",
+            title=f"Property Listing #{prop.id}",
+            excerpt=f"Address: {prop.address}, City: {prop.city or 'Gurdaspur'}, Reserve Price: ₹{prop.reserve_price or 0:,.2f}, EMD: ₹{prop.emd or 0:,.2f}, Auction Date: {prop.auction_date}, Status: {prop.foreclosure_status or 'scheduled'}",
+            score=1.0,
+            property_id=property_id,
+        )
+    ]
+    if doc:
+        citations.append(
+            Citation(
+                kind="document",
+                source_id=f"doc:{doc.id}",
+                title=doc.title or "Auction Notice",
+                excerpt=(doc.extracted_text or doc.title or "Official auction notice")[:400],
+                score=0.9,
+                document_id=doc.id,
+                property_id=property_id,
+                source_name=doc.source_name,
+            )
+        )
+
+    action_links = [{"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"}]
+    if doc:
+        first_seen = getattr(doc, "first_seen_at", None)
+        date_str = first_seen.strftime('%d %b %Y') if first_seen else 'Recent'
+        lines.extend([
+            "",
+            "Source Notice:",
+            f"Official Notice: {doc.title or doc.source_name or 'Bank Auction Notice'} (Recorded: {date_str})",
+        ])
+        action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{doc.id}/file"})
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="status_inquiry",
+    )
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="status_inquiry",
+    )
+
+
+def _handle_original_document_inquiry(db: Session, property_id: int, question: str) -> AnalystResponse:
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(question=question, answer=f"Property #{property_id} not found.", property_id=property_id)
+
+    pdocs = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).all()
+    if not pdocs:
+        return AnalystResponse(
+            question=question,
+            answer=f"No source auction notice documents are linked to Property #{property_id} on record.",
+            property_id=property_id,
+        )
+
+    doc_ids = [pd.document_id for pd in pdocs]
+    docs = db.query(Document).filter(Document.id.in_(doc_ids)).all()
+
+    lines = [
+        f"### Original Auction Notice for Lot #{prop.id}",
+        f"Property: {prop.address}",
+        "",
+        f"Found {len(docs)} verified source notice document(s) on file:",
+        "",
+    ]
+
+    action_links = []
+    citations = [
+        Citation(
+            kind="property",
+            source_id=f"prop:{prop.id}",
+            title=f"Property Listing #{prop.id}",
+            excerpt=f"Address: {prop.address}, City: {prop.city or 'Gurdaspur'}, Type: {prop.property_type}",
+            score=1.0,
+            property_id=property_id,
+        )
+    ]
+    for d in docs:
+        first_seen = getattr(d, "first_seen_at", None)
+        last_seen = getattr(d, "last_seen_at", None)
+        pub_str = first_seen.strftime("%d %b %Y") if first_seen else "Unknown"
+        check_str = last_seen.strftime("%d %b %Y %H:%M UTC") if last_seen else "Recent"
+        lines.extend([
+            f"{d.title or 'Auction Notice Document'}",
+            f"Publishing Source: {d.source_name or 'Bank Portal'}",
+            f"Notice Type: {d.document_type or 'auction_notice'}",
+            f"Recorded at: {pub_str} | Last checked: {check_str}",
+            f"Original Source URL: {d.source_url or 'Stored PDF'}",
+            "",
+        ])
+        action_links.append({
+            "title": f"Open Notice #{d.id} PDF",
+            "url": f"/documents/{d.id}/file",
+        })
+        citations.append(
+            Citation(
+                kind="document",
+                source_id=f"doc:{d.id}",
+                title=d.title or f"Document #{d.id}",
+                excerpt=(
+                    f"Title: {d.title}, Publisher: {d.source_name}, Type: {d.document_type}, "
+                    f"Recorded: {pub_str}, Checked: {check_str}, URL: {d.source_url}\n" +
+                    (d.extracted_text[:300] if d.extracted_text else "")
+                ),
+                score=1.0,
+                document_id=d.id,
+                property_id=property_id,
+                source_name=d.source_name,
+            )
+        )
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="document_retrieval",
+    )
+
+
+def _handle_deal_inquiry(db: Session, property_id: int, question: str) -> AnalystResponse:
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+        )
+
+    deal = build_deal_intelligence(db, property_id)
+    assessment_label = deal.assessment_label if deal else "Further investigation required"
+
+    reserve_str = f"₹{prop.reserve_price:,.0f}" if prop.reserve_price else "Undisclosed"
+    emd_str = (
+        f"₹{prop.emd:,.0f} ({deal.emd_percentage:.1f}%)"
+        if prop.emd and deal and deal.emd_percentage is not None
+        else (f"₹{prop.emd:,.0f}" if prop.emd else "Undisclosed")
+    )
+    psf_str = f"₹{deal.reserve_price_per_sqft:,.2f} / sq ft" if deal and deal.reserve_price_per_sqft else "Area not specified"
+    possession_str = (deal.possession_type.capitalize() if deal else "Not specified")
+
+    lines = [
+        f"### Deal Assessment: Lot #{prop.id}",
+        f"Address: {prop.address}",
+        "",
+        f"Assessment: {assessment_label}",
+        f"Possession Status: {possession_str}",
+        f"Reserve Price: {reserve_str} (Rate: {psf_str})",
+        f"Earnest Money Deposit (EMD): {emd_str}",
+        "Market Valuation: Market valuation unavailable — verified comparable transaction data is not available.",
+        "",
+        "Financial & Legal Considerations:",
+    ]
+    if deal and deal.factors:
+        lines.extend(f"• {f.label}" for f in deal.factors[:3])
+    else:
+        lines.append("• Public auction notice under SARFAESI Act")
+
+    lines.extend([
+        "",
+        "What to Look For (Key Red Flags):",
+        "• Possession Status: Verify whether the bank holds physical keys or only symbolic enforcement.",
+        "• Title and Dues: Check for unpaid municipal taxes, electricity arrears, and obtain a 30-year Encumbrance Certificate.",
+        "",
+        f"Bottom Line: {assessment_label}. " + (
+            "Clean documentation on record. Verify physical possession and title before bidding."
+            if assessment_label == "No major concerns identified in the available documents"
+            else "Further legal and physical due diligence required before participation."
+        ),
+    ])
+
+    action_links = [
+        {"title": f"View Full Property #{prop.id} Details", "url": f"/properties/{prop.id}"},
+        {"title": "Deep Due Diligence Analysis", "url": f"/properties/{prop.id}"},
+    ]
+    pdoc = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).first()
+    if pdoc:
+        action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{pdoc.document_id}/file"})
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=[
+            Citation(
+                kind="property",
+                source_id=f"prop:{prop.id}",
+                title=f"Property Listing #{prop.id}: {prop.address}",
+                excerpt=f"Reserve: {reserve_str}, EMD: {emd_str}, Assessment: {assessment_label}",
+                score=1.0,
+                property_id=property_id,
+            )
+        ],
+        action_links=action_links,
+        intent="property_deal_inquiry",
+    )
+
+
+def _handle_possession_inquiry(db: Session, property_id: int, question: str) -> AnalystResponse:
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+        )
+
+    pdocs = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).all()
+    doc_ids = [pd.document_id for pd in pdocs]
+
+    possession_type = "Symbolic Possession"
+    possession_excerpt = ""
+    target_doc = None
+    target_chunk = None
+
+    if doc_ids:
+        chunks = (
+            db.query(
+                DocumentChunk.id,
+                DocumentChunk.page_number,
+                DocumentChunk.text,
+                Document.id.label("doc_id"),
+                Document.title,
+                Document.filename,
+                Document.source_name,
+            )
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .filter(DocumentChunk.document_id.in_(doc_ids))
+            .all()
+        )
+        for chunk_id, page_no, text, doc_id, doc_title, filename, s_name in chunks:
+            c_text_lower = text.lower()
+            if "physical possession" in c_text_lower:
+                possession_type = "Physical Possession"
+                possession_excerpt = text[:300]
+                target_doc = (doc_id, doc_title, filename, s_name)
+                target_chunk = (chunk_id, page_no)
+                break
+            elif "symbolic possession" in c_text_lower or "constructive possession" in c_text_lower or "section 13(4)" in c_text_lower:
+                possession_type = "Symbolic Possession"
+                possession_excerpt = text[:300]
+                target_doc = (doc_id, doc_title, filename, s_name)
+                target_chunk = (chunk_id, page_no)
+
+    if possession_type == "Physical Possession":
+        desc = (
+            "The bank has taken Physical Possession of the property under the SARFAESI Act. "
+            "The premises are under bank locks or seals. However, conduct an in-person site inspection "
+            "to verify vacant status and ensure no unauthorized occupants or trespassers."
+        )
+    else:
+        desc = (
+            "The property is under Symbolic Possession (Section 13(4) of the SARFAESI Act). "
+            "The bank holds legal enforcement rights, but does not have physical keys or vacant possession. "
+            "The borrower, family members, or tenants may still be occupying the premises. "
+            "The auction purchaser or bank must apply to the District Magistrate or Chief Metropolitan Magistrate "
+            "under Section 14 to physically evict occupants and take possession."
+        )
+
+    lines = [
+        f"### Possession Status: Lot #{prop.id}",
+        f"Address: {prop.address}",
+        "",
+        f"Current Status: {possession_type}",
+        "",
+        desc,
+        "",
+        "Recommended Due Diligence:",
+        "• Conduct an in-person site visit to verify who is currently occupying or residing at the premises.",
+        "• Inquire with the Authorized Officer whether a Section 14 petition has been filed with the District Magistrate.",
+    ]
+
+    action_links = [
+        {"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"},
+        {"title": "Deep Due Diligence Analysis", "url": f"/properties/{prop.id}"},
+    ]
+    citations = []
+    if target_doc:
+        doc_id, doc_title, filename, s_name = target_doc
+        chunk_id, page_no = target_chunk if target_chunk else (None, 1)
+        action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{doc_id}/file"})
+        citations.append(
+            Citation(
+                kind="document",
+                source_id=f"doc:{doc_id}",
+                title=doc_title or "Auction Notice",
+                excerpt=possession_excerpt or f"Possession type: {possession_type}",
+                score=1.0,
+                document_id=doc_id,
+                chunk_id=chunk_id,
+                page_number=page_no,
+                property_id=property_id,
+                filename=filename,
+                source_name=s_name,
+            )
+        )
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="property_possession_inquiry",
+    )
+
+
+def _handle_liens_inquiry(db: Session, property_id: int, question: str) -> AnalystResponse:
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+        )
+
+    pdocs = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).all()
+    doc_ids = [pd.document_id for pd in pdocs]
+
+    liens_found = []
+    target_doc = None
+    target_chunk = None
+
+    if doc_ids:
+        chunks = (
+            db.query(
+                DocumentChunk.id,
+                DocumentChunk.page_number,
+                DocumentChunk.text,
+                Document.id.label("doc_id"),
+                Document.title,
+                Document.filename,
+                Document.source_name,
+            )
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .filter(DocumentChunk.document_id.in_(doc_ids))
+            .all()
+        )
+        for chunk_id, page_no, text, doc_id, doc_title, filename, s_name in chunks:
+            c_lower = text.lower()
+            if any(k in c_lower for k in ["encumbrance", "prior charge", "dues", "arrears", "tax", "litigation"]):
+                for line in text.split("\n"):
+                    if any(k in line.lower() for k in ["encumbrance", "dues", "arrears", "tax", "charge"]) and len(line.strip()) > 10:
+                        liens_found.append(line.strip())
+                        if not target_doc:
+                            target_doc = (doc_id, doc_title, filename, s_name)
+                            target_chunk = (chunk_id, page_no)
+                        if len(liens_found) >= 3:
+                            break
+
+    lines = [
+        f"### Liens and Encumbrances Audit: Lot #{prop.id}",
+        f"Property: {prop.address}",
+        "",
+        "Legal Sale Terms: 'As is where is, As is what is, and Whatever there is'.",
+        "",
+    ]
+
+    if liens_found:
+        lines.append("Disclosed in Notice:")
+        for item in liens_found[:3]:
+            lines.append(f"• {item}")
+        lines.append("")
+    else:
+        lines.extend([
+            "Notice Disclosure: No specific prior mortgages or competing commercial charges were declared by the bank in the published notice.",
+            "",
+        ])
+
+    lines.extend([
+        "Critical Investor Caveats:",
+        "• Statutory and Municipal Dues: Unpaid property taxes, electricity/water arrears, and municipal dues are not extinguished by SARFAESI auctions and transfer to the purchaser.",
+        "• Encumbrance Certificate (EC): Obtain an independent 30-year Encumbrance Certificate from the local Sub-Registrar's office to confirm clear title and rule out undisclosed third-party claims.",
+    ])
+
+    action_links = [
+        {"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"},
+        {"title": "Deep Due Diligence Analysis", "url": f"/properties/{prop.id}"},
+    ]
+    citations = []
+    if target_doc:
+        doc_id, doc_title, filename, s_name = target_doc
+        chunk_id, page_no = target_chunk if target_chunk else (None, 1)
+        action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{doc_id}/file"})
+        citations.append(
+            Citation(
+                kind="document",
+                source_id=f"doc:{doc_id}",
+                title=doc_title or "Auction Notice",
+                excerpt="; ".join(liens_found[:2]) if liens_found else "Sold on As is where is basis",
+                score=1.0,
+                document_id=doc_id,
+                chunk_id=chunk_id,
+                page_number=page_no,
+                property_id=property_id,
+                filename=filename,
+                source_name=s_name,
+            )
+        )
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="property_liens_inquiry",
+    )
+
+
+def _handle_address_inquiry(db: Session, property_id: int, question: str) -> AnalystResponse:
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+        )
+
+    pdocs = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).all()
+    doc_ids = [pd.document_id for pd in pdocs]
+
+    boundaries = {}
+    target_doc = None
+    target_chunk = None
+
+    if doc_ids:
+        chunks = (
+            db.query(
+                DocumentChunk.id,
+                DocumentChunk.page_number,
+                DocumentChunk.text,
+                Document.id.label("doc_id"),
+                Document.title,
+                Document.filename,
+                Document.source_name,
+            )
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .filter(DocumentChunk.document_id.in_(doc_ids))
+            .all()
+        )
+        for chunk_id, page_no, text, doc_id, doc_title, filename, s_name in chunks:
+            for dir_key in ["East", "West", "North", "South"]:
+                m = re.search(rf"\b{dir_key}\s*[:-]\s*([^,\n;.]+)", text, re.IGNORECASE)
+                if m and dir_key not in boundaries:
+                    boundaries[dir_key] = m.group(1).strip()
+            if len(boundaries) >= 2 and not target_doc:
+                target_doc = (doc_id, doc_title, filename, s_name)
+                target_chunk = (chunk_id, page_no)
+
+    lines = [
+        f"### Legal Property Location: Lot #{prop.id}",
+        "",
+        f"Official Address: {prop.address}",
+        f"City: {prop.city or 'Unspecified City'}",
+        f"Locality: {prop.locality or 'Unspecified'}",
+        f"Asset Category: {prop.property_type or 'Property'}",
+        f"Land / Built-up Area: {f'{prop.area_sqft} sq ft' if prop.area_sqft else 'Unspecified in summary'}",
+        f"Revenue / Survey No: {prop.survey_number or 'Unspecified in summary'}",
+    ]
+
+    if boundaries:
+        lines.extend([
+            "",
+            "Registered Boundaries (from Notice):",
+            *(f"• {direction}: {bound}" for direction, bound in boundaries.items()),
+        ])
+
+    lines.extend([
+        "",
+        "Verification Tip: Validate these exact boundaries and revenue numbers against local Revenue Department / land registry records before bidding.",
+    ])
+
+    action_links = [
+        {"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"},
+        {"title": "Deep Due Diligence Analysis", "url": f"/properties/{prop.id}"},
+    ]
+    citations = []
+    if target_doc:
+        doc_id, doc_title, filename, s_name = target_doc
+        chunk_id, page_no = target_chunk if target_chunk else (None, 1)
+        action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{doc_id}/file"})
+        citations.append(
+            Citation(
+                kind="document",
+                source_id=f"doc:{doc_id}",
+                title=doc_title or "Auction Notice",
+                excerpt=f"Boundaries: {', '.join(f'{k}: {v}' for k, v in boundaries.items())}",
+                score=1.0,
+                document_id=doc_id,
+                chunk_id=chunk_id,
+                page_number=page_no,
+                property_id=property_id,
+                filename=filename,
+                source_name=s_name,
+            )
+        )
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="property_address_inquiry",
+    )
+
+
+def _handle_validity_verification(
+    db: Session,
+    property_id: int | None,
+    question: str,
+) -> AnalystResponse:
+    if property_id is None:
+        return AnalystResponse(
+            question=question,
+            answer=(
+                "### Property Verification & Detail Validity\n\n"
+                "To verify property details, reserve price, OCR extraction confidence, and SARFAESI possession status, "
+                "please specify the property lot number:\n"
+                "Example: Are the details valid for Lot #1?\n"
+                "Or click Ask Analyst on any property card from the dashboard."
+            ),
+            intent="validity_verification",
+            action_links=[{"title": "Open Filtered Dashboard", "url": "/dashboard"}],
+        )
+
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+            intent="validity_verification",
+            action_links=[{"title": "Open Dashboard", "url": "/dashboard"}],
+        )
+
+    # Retrieve linked evidence records
+    evidence_rows = db.query(Evidence).filter(Evidence.property_id == property_id).all()
+    evidence_by_field: dict[str, Evidence] = {e.field: e for e in evidence_rows}
+
+    # Retrieve linked source notices
+    pdocs = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).all()
+    doc_ids = [pd.document_id for pd in pdocs]
+    docs = db.query(Document).filter(Document.id.in_(doc_ids)).all() if doc_ids else []
+
+    # Deal intelligence & valuation sanity
+    deal = build_deal_intelligence(db, property_id)
+
+    citations: list[Citation] = [
+        Citation(
+            kind="property",
+            source_id=f"prop:{prop.id}",
+            title=f"Property Listing #{prop.id}",
+            excerpt=f"Address: {prop.address}, City: {prop.city or 'Gurdaspur'}, Reserve Price: ₹{prop.reserve_price or 0:,.2f}, EMD: ₹{prop.emd or 0:,.2f}, Auction Date: {prop.auction_date}, Status: {prop.foreclosure_status or 'scheduled'}",
+            score=1.0,
+            property_id=property_id,
+        )
+    ]
+    action_links: list[dict[str, str]] = [
+        {"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"}
+    ]
+
+    lines = [
+        f"### Detail Validity & Verification Audit for Lot #{prop.id}",
+        "",
+        f"Property Address: {prop.address} ({prop.city or 'General'})",
+        f"Asset Category: {prop.property_type or 'Residential Property'}",
+        "",
+        "1. Published Auction Data",
+    ]
+
+    # Reserve price verification
+    rp_ev = evidence_by_field.get("reserve_price")
+    if prop.reserve_price is not None:
+        rp_formatted = f"₹{float(prop.reserve_price):,.0f}"
+        if rp_ev and rp_ev.confidence:
+            conf_pct = f"{float(rp_ev.confidence) * 100:.0f}%"
+            lines.append(f"Reserve Price: {rp_formatted} — Verified ({conf_pct} OCR confidence)")
+        else:
+            lines.append(f"Reserve Price: {rp_formatted} — Verified in published record")
+    else:
+        lines.append("Reserve Price: Pending / unstated in published record")
+
+    # EMD verification & 10% statutory check
+    emd_ev = evidence_by_field.get("emd")
+    if prop.emd is not None and prop.reserve_price is not None and float(prop.reserve_price) > 0:
+        emd_formatted = f"₹{float(prop.emd):,.0f}"
+        ratio = float(prop.emd) / float(prop.reserve_price)
+        if 0.095 <= ratio <= 0.105:
+            lines.append(
+                f"Earnest Money Deposit (EMD): {emd_formatted} — Statutory Compliant (exactly 10% of Reserve Price under SARFAESI Rule 8(5))"
+            )
+        else:
+            lines.append(
+                f"Earnest Money Deposit (EMD): {emd_formatted} — Non-standard ratio ({ratio * 100:.1f}% of reserve price)"
+            )
+    elif prop.emd is not None:
+        lines.append(f"Earnest Money Deposit (EMD): ₹{float(prop.emd):,.0f}")
+    else:
+        lines.append("Earnest Money Deposit (EMD): Missing from extracted parameters")
+
+    # Possession type SARFAESI risk check
+    lines.extend([
+        "",
+        "2. Legal Possession Status",
+    ])
+    poss = (prop.possession_type or "").lower().strip()
+    if "symbolic" in poss or "constructive" in poss or "13(4)" in poss:
+        lines.append(
+            "High Legal Risk — Symbolic Possession (Section 13(4)): "
+            "The bank holds legal right to sell under SARFAESI Section 13(4), but has NOT executed physical vacant possession under Section 14 (DM/CMM order). "
+            "The borrower or third-party occupants may still physically occupy the premises. Eviction and physical handover timelines rest on the buyer."
+        )
+    elif "physical" in poss or "actual" in poss or "vacant" in poss or "14" in poss:
+        lines.append(
+            "Verified Physical Possession (Section 14): "
+            "The secured creditor has obtained physical/vacant custody of the asset. Handover upon full payment is legally and operationally clear."
+        )
+    else:
+        lines.append(
+            "Possession Status Unspecified: "
+            "The auction notice does not explicitly designate whether possession is physical or symbolic. "
+            "Action Required: Confirm with the bank's Authorized Officer whether physical vacant possession has been obtained prior to submitting EMD."
+        )
+
+    # Auction timeline check
+    today = date.today()
+    if prop.auction_date:
+        a_date_str = prop.auction_date.strftime("%d %b %Y")
+        if prop.auction_date < today:
+            lines.append(f"Auction Date Passed: Notice date was {a_date_str}. Check if lot was sold or if re-auction is scheduled.")
+        else:
+            lines.append(f"Upcoming Auction Date: Scheduled for {a_date_str}.")
+    else:
+        lines.append("Auction Date: Date to be announced or not parsed from primary notice.")
+
+    # Valuation & Market Sanity
+    lines.extend([
+        "",
+        "3. Independent Market Valuation Sanity",
+    ])
+    if deal and deal.comparable_count >= 3 and deal.discount_percentage is not None:
+        lines.append(
+            f"Independent Comparable Grounding: Validated against {deal.comparable_count} registered market sales in {prop.city or 'the vicinity'}. "
+            f"Reserve price reflects a {deal.discount_percentage:.1f}% discount vs market benchmark."
+        )
+    else:
+        lines.append(
+            "Market Comparables: Fewer than 3 verified registry comparables are indexed in this micro-locality. "
+            "The reserve price should be cross-verified with local brokers or registrar circle rates."
+        )
+
+    # Notice Document Citations
+    lines.extend([
+        "",
+        "4. Document Notice",
+    ])
+    if docs:
+        for doc in docs:
+            lines.append(f"Official Notice: {doc.title} published by {doc.source_name or 'Bank'} (Doc #{doc.id})")
+            if doc.source_url:
+                lines.append(f"Portal URL: {doc.source_url}")
+            action_links.append({"title": f"Download Notice #{doc.id} PDF", "url": f"/documents/{doc.id}/file"})
+            citations.append(
+                Citation(
+                    kind="document",
+                    source_id=f"doc:{doc.id}:validity",
+                    title=f"Source Notice: {doc.title}",
+                    excerpt=(
+                        f"Official auction notice for Lot #{prop.id} ({prop.address}). "
+                        f"Reserve: ₹{prop.reserve_price or 0:,.0f}, EMD: ₹{prop.emd or 0:,.0f}, "
+                        f"Possession: {prop.possession_type or 'Unstated'}, Bank: {doc.source_name}"
+                    ),
+                    score=1.0,
+                    document_id=doc.id,
+                    property_id=prop.id,
+                    source_name=doc.source_name,
+                )
+            )
+    else:
+        lines.append("Notice: No PDF document is linked to this property in the database.")
+
+    action_links.append({"title": "Open Filtered Dashboard", "url": "/dashboard"})
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="validity_verification",
+    )
+
+
+STATE_CITY_MAP: dict[str, list[str]] = {
+    "punjab": ["gurdaspur", "pathankot", "amritsar", "ludhiana", "jalandhar", "mohali", "bathinda", "patiala", "hoshiarpur", "kapurthala", "batala"],
+    "haryana": ["gurugram", "gurgaon", "faridabad", "panchkula", "ambala", "karnal", "rohtak", "hisar", "sonipat", "panipat"],
+    "delhi": ["delhi", "new delhi", "dwarka", "rohini"],
+    "maharashtra": ["mumbai", "pune", "nagpur", "thane", "nashik", "aurangabad", "navi mumbai"],
+    "uttar pradesh": ["noida", "greater noida", "ghaziabad", "lucknow", "kanpur", "varanasi", "agra", "meerut", "prayagraj"],
+    "karnataka": ["bangalore", "bengaluru", "mysore", "mysuru", "mangalore", "hubli", "belgaum"],
+    "gujarat": ["ahmedabad", "surat", "vadodara", "rajkot", "gandhinagar"],
+    "rajasthan": ["jaipur", "jodhpur", "udaipur", "kota", "bikaner", "ajmer"],
+    "chandigarh": ["chandigarh"],
+}
+
+
+def _handle_discovery_search(
+    db: Session,
+    question: str,
+    q_lower: str,
+    user_pref: UserPreference | None,
+) -> AnalystResponse:
+    query = db.query(Property)
+
+    # 1. Enforce residential scope
+    query = query.filter(
+        or_(
+            func.lower(Property.property_type).ilike("%residential%"),
+            func.lower(Property.property_type).ilike("%flat%"),
+            func.lower(Property.property_type).ilike("%apartment%"),
+            func.lower(Property.property_type).ilike("%house%"),
+            func.lower(Property.property_type).ilike("%villa%"),
+            func.lower(Property.property_type).ilike("%duplex%"),
+        ),
+        ~func.lower(Property.property_type).ilike("%commercial%"),
+        ~func.lower(Property.property_type).ilike("%industrial%"),
+    )
+
+    # 2. Extract location constraints from query or user preferences
+    target_state = None
+    target_city = None
+    target_district = None
+
+    # Detect state
+    for st_candidate in STATE_CITY_MAP.keys():
+        if st_candidate in q_lower:
+            target_state = st_candidate
+            break
+
+    # Check for specific known cities in query
+    all_known_cities = [
+        "gurdaspur", "pathankot", "amritsar", "ludhiana", "jalandhar", "mohali",
+        "ghaziabad", "noida", "lucknow", "mumbai", "pune", "gurugram", "faridabad",
+        "chandigarh", "delhi", "bangalore",
+    ]
+    for candidate in all_known_cities:
+        if candidate in q_lower:
+            target_city = candidate.capitalize()
+            break
+
+    # If no explicit city/state in question, fall back to user's onboarding district/city
+    if not target_city and not target_state and user_pref:
+        if user_pref.city:
+            target_city = user_pref.city
+        elif user_pref.district:
+            target_district = user_pref.district
+
+    if target_state:
+        state_cities = STATE_CITY_MAP.get(target_state, [])
+        state_filters = [
+            func.lower(Property.state).ilike(f"%{target_state}%"),
+            func.lower(Property.address).ilike(f"%{target_state}%"),
+            func.lower(Property.district).ilike(f"%{target_state}%"),
+        ]
+        if state_cities:
+            state_filters.append(func.lower(Property.city).in_(state_cities))
+            state_filters.append(func.lower(Property.address).ilike(f"%{state_cities[0]}%"))
+        query = query.filter(or_(*state_filters))
+    elif target_city:
+        query = query.filter(
+            or_(
+                func.lower(Property.city).ilike(f"%{target_city.lower()}%"),
+                func.lower(Property.address).ilike(f"%{target_city.lower()}%"),
+            )
+        )
+    elif target_district:
+        query = query.filter(
+            or_(
+                func.lower(Property.city).ilike(f"%{target_district.lower()}%"),
+                func.lower(Property.address).ilike(f"%{target_district.lower()}%"),
+            )
+        )
+
+    # 3. Extract price ceiling (e.g. "below 50 lakh", "under 4000000")
+    price_match = re.search(r"(?:below|under|<)\s*(?:rs\.?|inr)?\s*([\d\.,]+)\s*(lakh|cr)?", q_lower)
+    if price_match:
+        val_str = price_match.group(1).replace(",", "")
+        unit = price_match.group(2)
+        try:
+            val = float(val_str)
+            if unit == "lakh":
+                val *= 100000
+            elif unit == "cr":
+                val *= 10000000
+            query = query.filter(Property.reserve_price <= val)
+        except ValueError:
+            pass
+
+    # 4. Check if user is asking for "best", "top deals", "highest discount"
+    is_best_query = any(k in q_lower for k in [
+        "best", "top", "deal", "discount", "score", "recommended", "cheapest", "highest discount"
+    ])
+
+    loc_desc = (target_state.title() if target_state else None) or target_city or target_district or "your monitored areas"
+
+    candidates = query.limit(30).all()
+
+    if is_best_query and candidates:
+        scored: list[tuple[int, float, Property, Any]] = []
+        for p in candidates:
+            deal = build_deal_intelligence(db, p.id)
+            label = deal.assessment_label if deal else "Further investigation required"
+            # Prioritize clean documents / physical possession
+            rank = (
+                4 if label == "No major concerns identified in the available documents"
+                else 3 if label == "Further investigation required"
+                else 2 if label == "Important risks identified"
+                else 1
+            )
+            rp = float(p.reserve_price) if p.reserve_price is not None else 1e9
+            scored.append((rank, -rp, p, deal))
+
+        if "cheapest" in q_lower:
+            scored.sort(key=lambda x: -x[1])  # rp ascending
+        else:
+            scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+        results_with_deal = [(x[2], x[3]) for x in scored[:6]]
+        results = [x[0] for x in results_with_deal]
+    else:
+        results = query.order_by(Property.auction_date.desc().nullslast(), Property.id.desc()).limit(6).all()
+        results_with_deal = [(p, build_deal_intelligence(db, p.id)) for p in results]
+
+    title_heading = "Top Curated Auction Deals" if is_best_query else "Latest Residential Auctions"
+    lines = [
+        f"### {title_heading} ({loc_desc})",
+        f"Found {len(results)} active residential auction lots:",
+        "",
+    ]
+
+    action_links = []
+    citations = []
+    if results_with_deal:
+        for p, deal in results_with_deal:
+            rp_str = f"₹{p.reserve_price:,.0f}" if p.reserve_price else "Price pending"
+            date_str = p.auction_date.strftime("%d %b %Y") if p.auction_date else "Date unannounced"
+            emd_str = f" | EMD: ₹{p.emd:,.0f}" if p.emd else ""
+
+            deal_str = ""
+            if deal and deal.assessment_label:
+                deal_str = f" — {deal.assessment_label}"
+
+            lines.append(
+                f"Lot #{p.id}: {p.address} ({p.city or 'General'}){deal_str}\n"
+                f"Reserve: {rp_str}{emd_str} | Auction Date: {date_str}\n"
+            )
+            action_links.append({
+                "title": f"Open Lot #{p.id}",
+                "url": f"/properties/{p.id}",
+            })
+            citations.append(
+                Citation(
+                    kind="property",
+                    source_id=f"prop:{p.id}",
+                    title=f"Lot #{p.id}: {p.address} ({p.city or 'Gurdaspur'})",
+                    excerpt=f"Address: {p.address}, City: {p.city or 'Gurdaspur'}, Reserve: {rp_str}, Status: {p.foreclosure_status or 'scheduled'}, Auction: {date_str}",
+                    score=1.0,
+                    property_id=p.id,
+                )
+            )
+    else:
+        lines.append(f"No properties matching your criteria were found in {loc_desc}. Try broadening your search or connecting additional auction sources in Admin.")
+
+    action_links.append({"title": "Open Filtered Dashboard", "url": "/dashboard"})
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        citations=citations,
+        action_links=action_links,
+        intent="inventory_discovery",
+    )

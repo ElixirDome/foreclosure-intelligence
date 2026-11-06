@@ -106,12 +106,85 @@ class Property(Base):
         index=True,
     )
 
+    increment_amount: Mapped[float | None] = mapped_column(
+        Numeric,
+        nullable=True,
+    )
+
+    auction_start: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    auction_end: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    possession_type: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    property_sub_type: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    district: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    state: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    pincode: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    bank_name: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    branch_name: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    raw_status: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+
+    extra_data: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    property_unique_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    auction_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    property_images: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    inspection_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    inspection_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    emd_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    listing_url: Mapped[str | None] = mapped_column(String, nullable=True)
+
 
 class User(Base):
     __tablename__ = "users"
 
     properties: Mapped[list["Property"]] = relationship(
-    back_populates="user"
+        back_populates="user"
+    )
+    preference: Mapped["UserPreference | None"] = relationship(
+        "UserPreference",
+        back_populates="user",
+        uselist=False,
     )
     id: Mapped[int] = mapped_column(
         Integer,
@@ -135,6 +208,37 @@ class User(Base):
         default="user",
         nullable=False
     )
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    state: Mapped[str | None] = mapped_column(String, nullable=True)
+    district: Mapped[str | None] = mapped_column(String, nullable=True)
+    city: Mapped[str | None] = mapped_column(String, nullable=True)
+    locality: Mapped[str | None] = mapped_column(String, nullable=True)
+    property_types: Mapped[list | None] = mapped_column(JSON, default=list)
+    min_reserve_price: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    max_reserve_price: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    preferred_banks: Mapped[list | None] = mapped_column(JSON, default=list)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    user: Mapped["User"] = relationship("User", back_populates="preference")
+
 
 class IngestionRun(Base):
     __tablename__ = "ingestion_runs"
@@ -189,7 +293,9 @@ class Document(Base):
 
     # Full normalized text after extraction/OCR. Used for chunking and
     # keyword retrieval before vector search exists.
-    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Deferred by default so large PDF texts are not pulled into memory
+    # on general joins and queries (prevents PostgreSQL printtup OutOfMemory).
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True, deferred=True)
 
     content_hash: Mapped[str | None] = mapped_column(
         String,

@@ -94,17 +94,25 @@ def extract_pages_from_source(
             except Exception:
                 pass
 
-    # PDF bytes in memory
+       # PDF bytes in memory
     if isinstance(doc.content, (bytes, bytearray)) and doc.content:
         if "pdf" in mime or doc.content[:4] == b"%PDF":
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=True) as tmp:
-                tmp.write(doc.content)
-                tmp.flush()
-                return extract_pages_from_pdf(tmp.name)
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    suffix=".pdf",
+                    delete=False,
+                ) as tmp:
+                    tmp.write(doc.content)
+                    tmp_path = Path(tmp.name)
+
+                return extract_pages_from_pdf(tmp_path)
+            finally:
+                if tmp_path is not None:
+                    tmp_path.unlink(missing_ok=True)
+
         # Treat other binary as opaque — no text pages yet (OCR later)
         return []
-
-    return []
 
 
 def ingest_document(
@@ -128,7 +136,19 @@ def ingest_document(
     source = _as_source_document(raw)
 
     if pages is None:
-        pages = extract_pages_from_source(source)
+        if isinstance(raw, dict) and raw.get("pages"):
+            pages = raw["pages"]
+        elif hasattr(raw, "pages") and getattr(raw, "pages"):
+            pages = getattr(raw, "pages")
+        else:
+            pages = extract_pages_from_source(source)
+
+    if not pages:
+        raw_text = (
+            getattr(source, "extracted_text", None)
+            or (raw.get("extracted_text") if isinstance(raw, dict) else getattr(raw, "extracted_text", None))
+        )
+        pages = [raw_text] if raw_text else []
 
     extracted_text = "\n\n".join(
         p.strip() for p in pages if p and p.strip()
@@ -147,13 +167,28 @@ def ingest_document(
         extracted_text=extracted_text,
     )
 
+    content_changed = bool(
+        getattr(document, "_ingested_content_changed", False)
+    )
+    should_rechunk = force_rechunk or content_changed
+
     chunks = []
     if pages:
         chunks = ensure_document_chunks_from_pages(
             db,
             document,
             pages,
-            force=force_rechunk,
+            force=should_rechunk,
+        )
+    elif content_changed:
+        # Do not leave chunks/text from the previous bytes when the revised
+        # file could not be parsed. Evidence was invalidated by the upsert.
+        document.extracted_text = None
+        chunks = ensure_document_chunks_from_pages(
+            db,
+            document,
+            [],
+            force=True,
         )
 
     return {
@@ -170,14 +205,20 @@ def ingest_documents(
     *,
     force_rechunk: bool = False,
 ) -> list[dict[str, Any]]:
-    """Ingest many documents; returns one result dict per input."""
+    """Ingest many documents; returns one result dict per input, isolating failures."""
+    import logging
+    logger = logging.getLogger(__name__)
     results = []
     for raw in raw_docs:
-        results.append(
-            ingest_document(
-                db,
-                raw,
-                force_rechunk=force_rechunk,
-            )
-        )
+        try:
+            with db.begin_nested():
+                results.append(
+                    ingest_document(
+                        db,
+                        raw,
+                        force_rechunk=force_rechunk,
+                    )
+                )
+        except Exception as exc:
+            logger.error("Failed to ingest document item: %s", exc, exc_info=True)
     return results

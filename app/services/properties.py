@@ -1,10 +1,10 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from math import ceil
-from datetime import date
-from app.models import Property, PropertyDocument, Document, PropertyValuation
+from datetime import date, datetime
+from app.models import Property, PropertyDocument, Document, PropertyValuation, Evidence
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, or_, select
 
 from fastapi import HTTPException
 from app.schemas import PropertyCreate, ExtractedProperty
@@ -12,15 +12,16 @@ from app.services.llm import LLMProvider,generate_property_analysis
 from app.services.normalization import create_property_key
 
 from app.services.valuation import record_valuation
+from app.services.auction_date import get_current_ist_date
 
-from app.domain.deal_analysis import (
-    DEAL_SCORE_RISK_MULTIPLIER,
-    FORECLOSURE_RISK_LEVELS,
-    calculate_deal_score,
-    calculate_deal_rating,
-    calculate_discount,
-    calculate_price_per_sqft,
-    calculate_confidence_adjusted_score,
+from app.domain.auction_intelligence import (
+    calculate_emd_percentage,
+    calculate_reserve_price_per_sqft,
+    evaluate_auction_assessment,
+    MARKET_VALUATION_UNAVAILABLE_MESSAGE,
+    FinancialIntelligence,
+    AuctionIntelligenceDetails,
+    PropertyLegalIntelligence,
 )
 def get_property_by_id(
     property_id: int,
@@ -59,6 +60,7 @@ def save_extracted_properties(
 ):
     saved_properties = []
     skipped_properties = []
+    today_ist = get_current_ist_date()
 
     for extracted in properties:
 
@@ -75,12 +77,37 @@ def save_extracted_properties(
             .first()
         )
 
+        auction_date = (
+            extracted.auction_start.date()
+            if extracted.auction_start is not None
+            else None
+        )
+
         if existing_property:
-           
+            # Re-auction / Rescheduled: if the property has a new future auction date, reactivate it
+            if auction_date is not None and auction_date >= today_ist:
+                existing_property.auction_date = auction_date
+                existing_property.auction_start = extracted.auction_start
+                existing_property.auction_end = extracted.auction_end
+                existing_property.foreclosure_status = "scheduled"
+                if extracted.opening_bid is not None:
+                    existing_property.opening_bid = extracted.opening_bid
+                    existing_property.reserve_price = extracted.opening_bid
+                db.commit()
+
             skipped_properties.append({
                 "property_id": existing_property.id,
                 "address": existing_property.address,
                 "reason": "duplicate",
+            })
+            continue
+
+        # Prevent creation of new active property listings from outdated/historical auction notices
+        if auction_date is not None and auction_date < today_ist:
+            skipped_properties.append({
+                "address": extracted.address or "Unknown",
+                "auction_date": str(auction_date),
+                "reason": "historical_expired_auction_archived",
             })
             continue
 
@@ -96,11 +123,7 @@ def save_extracted_properties(
             opening_bid=extracted.opening_bid,
             property_type=extracted.property_type,
             survey_number=extracted.survey_number,
-            auction_date=(
-                extracted.auction_start.date()
-                if extracted.auction_start is not None
-                else None
-            ),
+            auction_date=auction_date,
             foreclosure_status="scheduled",
             property_key=property_key,
         )
@@ -120,22 +143,27 @@ def save_extracted_properties(
 
 def get_properties(
     db: Session,
-    page: int,
-    limit: int,
-    search: str | None,
-    min_price: int | None,
-    max_price: int | None,
-    bedrooms: int | None,
-    sort_by: str,
-    order: str,
-    min_area: int | None,
-    max_area: int | None,
-    min_discount: float | None,
-    max_discount: float | None,
-    foreclosure_status: str | None,
-    auction_date_from: date | None,
-    auction_date_to: date | None,
+    page: int = 1,
+    limit: int = 20,
+    search: str | None = None,
+    min_price: int | float | None = None,
+    max_price: int | float | None = None,
+    bedrooms: int | None = None,
+    sort_by: str = "id",
+    order: str = "asc",
+    min_area: int | float | None = None,
+    max_area: int | float | None = None,
+    min_discount: float | None = None,
+    max_discount: float | None = None,
+    foreclosure_status: str | None = None,
+    auction_date_from: date | None = None,
+    auction_date_to: date | None = None,
     property_type: str | None = None,
+    city: str | None = None,
+    district: str | None = None,
+    locality: str | None = None,
+    include_expired: bool = False,
+    **kwargs,
 ):
     """
     Query properties with calculated deal metrics.
@@ -145,80 +173,17 @@ def get_properties(
     app.domain.deal_analysis.
     """
 
-    trusted_estimate = (
-        select(PropertyValuation.estimated_value)
-        .where(
-            PropertyValuation.property_id == Property.id,
-            PropertyValuation.source == "market_comparables",
-            PropertyValuation.valuation_method == "residential_comparable_sales",
-        )
-        .order_by(PropertyValuation.id.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
+    query = db.query(Property)
 
-    discount_percentage = case(
-        (
-            and_(
-                trusted_estimate.is_not(None),
-                Property.reserve_price.is_not(None),
-                trusted_estimate > 0,
-            ),
-            (
-                (
-                    trusted_estimate
-                    - Property.reserve_price
-                )
-                / trusted_estimate
-                * 100
-            ),
-        ),
-        else_=None,
-    ).label("discount_percentage")
-
-    risk_level = case(
-        *[
-            (
-                func.lower(Property.foreclosure_status) == status,
-                risk,
-            )
-            for status, risk in FORECLOSURE_RISK_LEVELS.items()
-        ],
-        else_=2,
-    )
-
-    raw_deal_score = (
-        discount_percentage
-        - (risk_level * DEAL_SCORE_RISK_MULTIPLIER)
-    )
-
-    deal_score = case(
-        (
-            discount_percentage.is_(None),
-            None,
-        ),
-        (
-            raw_deal_score < 0,
-            0,
-        ),
-        (
-            raw_deal_score > 100,
-            100,
-        ),
-        else_=raw_deal_score,
-    ).label("deal_score")
-
-    query = db.query(
-        Property,
-        discount_percentage,
-        deal_score,
-        trusted_estimate.label("trusted_estimated_value"),
-    )
-
-    # Search
+    # Search across address, city, and locality
     if search:
+        search_term = f"%{search.strip()}%"
         query = query.filter(
-            Property.address.ilike(f"%{search.strip()}%")
+            or_(
+                Property.address.ilike(search_term),
+                Property.city.ilike(search_term),
+                Property.locality.ilike(search_term),
+            )
         )
 
     # Price filters
@@ -238,48 +203,45 @@ def get_properties(
     if max_area is not None:
         query = query.filter(Property.area_sqft <= max_area)
 
-    # Discount filters
-    if min_discount is not None:
-        query = query.filter(
-            trusted_estimate.is_not(None),
-            Property.reserve_price.is_not(None),
-            trusted_estimate > 0,
-            (
-                (
-                    trusted_estimate
-                    - Property.reserve_price
-                )
-                / trusted_estimate
-                * 100
-            ) >= min_discount,
-        )
-
-    if max_discount is not None:
-        query = query.filter(
-            trusted_estimate.is_not(None),
-            Property.reserve_price.is_not(None),
-            trusted_estimate > 0,
-            (
-                (
-                    trusted_estimate
-                    - Property.reserve_price
-                )
-                / trusted_estimate
-                * 100
-            ) <= max_discount,
-        )
-
-    # Foreclosure status
+    # Foreclosure status visibility rules:
+    # If caller specifies a status, filter to that exact status.
+    # Otherwise, hide sold and cancelled properties from active listings.
     if foreclosure_status is not None:
         query = query.filter(
             func.lower(Property.foreclosure_status)
             == foreclosure_status.lower()
         )
+    else:
+        query = query.filter(
+            or_(
+                Property.foreclosure_status.is_(None),
+                func.lower(Property.foreclosure_status).notin_(["sold", "cancelled"]),
+            )
+        )
 
-    # Auction date filters
+    # Auction date visibility rules:
+    # If explicit date bounds are passed, honour them.
+    # Otherwise, if include_expired is False, restrict to current/future actionable auctions.
+    today_ist = get_current_ist_date()
     if auction_date_from is not None:
         query = query.filter(
             Property.auction_date >= auction_date_from
+        )
+    elif not include_expired:
+        today_start = datetime.combine(today_ist, datetime.min.time())
+        query = query.filter(
+            or_(
+                Property.auction_date >= today_ist,
+                and_(
+                    Property.auction_date.is_(None),
+                    Property.auction_end.is_not(None),
+                    Property.auction_end >= today_start,
+                ),
+                and_(
+                    Property.auction_date.is_(None),
+                    Property.auction_end.is_(None),
+                ),
+            )
         )
 
     if auction_date_to is not None:
@@ -289,14 +251,51 @@ def get_properties(
 
     if property_type is not None:
         pt = property_type.strip().lower()
-        if pt in {"residential", "commercial"}:
+        if pt == "residential":
             query = query.filter(
-                func.lower(Property.property_type).ilike(f"%{pt}%")
+                or_(
+                    func.lower(Property.property_type).ilike("%residential%"),
+                    func.lower(Property.property_type).ilike("%flat%"),
+                    func.lower(Property.property_type).ilike("%apartment%"),
+                    func.lower(Property.property_type).ilike("%house%"),
+                    func.lower(Property.property_type).ilike("%villa%"),
+                    func.lower(Property.property_type).ilike("%duplex%"),
+                ),
+                ~func.lower(Property.property_type).ilike("%commercial%"),
+                ~func.lower(Property.property_type).ilike("%industrial%"),
+                ~func.lower(Property.property_type).ilike("%shop%"),
+                ~func.lower(Property.property_type).ilike("%office%"),
+                ~func.lower(Property.property_type).ilike("%factory%"),
+                ~func.lower(Property.property_type).ilike("%warehouse%"),
             )
-        else:
+        elif pt == "commercial":
+            query = query.filter(
+                or_(
+                    func.lower(Property.property_type).ilike("%commercial%"),
+                    func.lower(Property.property_type).ilike("%industrial%"),
+                    func.lower(Property.property_type).ilike("%shop%"),
+                    func.lower(Property.property_type).ilike("%office%"),
+                    func.lower(Property.property_type).ilike("%factory%"),
+                    func.lower(Property.property_type).ilike("%warehouse%"),
+                )
+            )
+        elif pt != "all":
             query = query.filter(
                 func.lower(Property.property_type) == pt
             )
+
+    # Location filters
+    if city:
+        query = query.filter(func.lower(Property.city).ilike(f"%{city.strip().lower()}%"))
+    if locality:
+        query = query.filter(func.lower(Property.locality).ilike(f"%{locality.strip().lower()}%"))
+    if district:
+        query = query.filter(
+            or_(
+                func.lower(Property.city).ilike(f"%{district.strip().lower()}%"),
+                func.lower(Property.address).ilike(f"%{district.strip().lower()}%"),
+            )
+        )
 
     # Pagination count
     total = query.count()
@@ -335,7 +334,13 @@ def get_properties(
 
     properties = []
 
-    for property, discount, score, trusted_estimated_value in results:
+    for property in results:
+        res_price = float(property.reserve_price) if property.reserve_price is not None else None
+        emd_val = float(property.emd) if getattr(property, "emd", None) is not None else None
+        area_val = float(property.area_sqft) if property.area_sqft is not None else None
+        emd_pct = calculate_emd_percentage(emd_val, res_price)
+        res_psf = calculate_reserve_price_per_sqft(res_price, area_val)
+
         property_data = {
             "id": property.id,
             "address": property.address,
@@ -348,33 +353,34 @@ def get_properties(
             "auction_date": property.auction_date,
             "foreclosure_status": property.foreclosure_status,
             "opening_bid": property.opening_bid,
-            "reserve_price": (
-                float(property.reserve_price)
-                if property.reserve_price is not None
-                else None
-            ),
-            "emd": (
-                float(property.emd)
-                if getattr(property, "emd", None) is not None
-                else None
-            ),
-            "estimated_value": (
-                float(trusted_estimated_value)
-                if trusted_estimated_value is not None
-                else None
-            ),
+            "reserve_price": res_price,
+            "emd": emd_val,
+            "emd_percentage": emd_pct,
+            "reserve_price_per_sqft": res_psf,
+            "estimated_value": None,
             "property_type": property.property_type,
+            "property_sub_type": property.property_sub_type,
             "survey_number": property.survey_number,
-            "discount_percentage": (
-                float(discount)
-                if discount is not None
-                else None
-            ),
-            "deal_score": (
-                float(score)
-                if score is not None
-                else None
-            ),
+            "district": property.district,
+            "state": property.state,
+            "pincode": property.pincode,
+            "bank_name": property.bank_name,
+            "branch_name": property.branch_name,
+            "possession_type": property.possession_type,
+            "auction_start": property.auction_start,
+            "auction_end": property.auction_end,
+            "emd_deadline": property.emd_deadline,
+            "inspection_start": property.inspection_start,
+            "inspection_end": property.inspection_end,
+            "property_unique_id": property.property_unique_id,
+            "auction_id": property.auction_id,
+            "property_images": property.property_images or [],
+            "listing_url": property.listing_url,
+            "extra_data": property.extra_data or {},
+            "raw_status": property.raw_status,
+            "market_valuation_status": MARKET_VALUATION_UNAVAILABLE_MESSAGE,
+            "discount_percentage": None,
+            "deal_score": None,
         }
 
         properties.append(property_data)
@@ -384,19 +390,26 @@ def get_properties(
     if properties:
         prop_ids = [item["id"] for item in properties]
         rows = (
-            db.query(PropertyDocument, Document)
+            db.query(
+                PropertyDocument.property_id,
+                Document.source_name,
+                Document.source_url,
+                Document.document_type,
+                Document.title,
+                Document.filename,
+            )
             .join(Document, Document.id == PropertyDocument.document_id)
             .filter(PropertyDocument.property_id.in_(prop_ids))
             .all()
         )
         by_prop: dict[int, list] = {}
-        for link, doc in rows:
-            by_prop.setdefault(link.property_id, []).append({
-                "source_name": doc.source_name,
-                "source_url": doc.source_url,
-                "document_type": doc.document_type,
-                "title": doc.title,
-                "filename": doc.filename,
+        for prop_id, s_name, s_url, d_type, d_title, d_fname in rows:
+            by_prop.setdefault(prop_id, []).append({
+                "source_name": s_name,
+                "source_url": s_url,
+                "document_type": d_type,
+                "title": d_title,
+                "filename": d_fname,
             })
         for item in properties:
             item["sources"] = by_prop.get(item["id"], [])
@@ -496,90 +509,214 @@ def get_property_or_404(# helper function
 # It should always produce the same answer for the same property.
 
 def analyze_property(property: Property):
-    valuation_confidence = None
-    automated_valuations = [
-        valuation
-        for valuation in property.valuations
-        if valuation.source == "market_comparables"
-        and valuation.valuation_method == "residential_comparable_sales"
-    ]
-    latest_valuation = (
-        max(automated_valuations, key=lambda valuation: valuation.id)
-        if automated_valuations
-        else None
-    )
-    if latest_valuation is not None:
-        if latest_valuation.confidence is not None:
-            valuation_confidence = float(latest_valuation.confidence)
-        estimated_value = float(latest_valuation.estimated_value)
-    else:
-        # Do not trust legacy estimates that were typed into property fields.
-        estimated_value = None
-    opening_bid = (
-        float(property.opening_bid)
-        if property.opening_bid is not None
-        else None
-    )
-    reserve_price = (
-        float(property.reserve_price)
-        if property.reserve_price is not None
-        else None
-    )
-    emd = float(property.emd) if property.emd is not None else None
+    """
+    Deterministic auction intelligence analysis.
+    Eliminates unverified AVM estimates, arbitrary deal scores, and discount ratings.
+    Evaluates financial intelligence, operational particulars, legal intelligence, and transparent assessments.
+    """
+    extra = property.extra_data or {}
 
-    result = {
-        "estimated_value": estimated_value,
-        "opening_bid": opening_bid,
+    # Financial Intelligence
+    reserve_price = float(property.reserve_price) if property.reserve_price is not None else None
+    emd = float(property.emd) if getattr(property, "emd", None) is not None else None
+    area_sqft = float(property.area_sqft) if property.area_sqft is not None else None
+    opening_bid = float(property.opening_bid) if property.opening_bid is not None else None
+
+    emd_percentage = calculate_emd_percentage(emd, reserve_price)
+    reserve_psf = calculate_reserve_price_per_sqft(reserve_price, area_sqft)
+
+    disclosed_dues = (
+        extra.get("borrowerDues")
+        or extra.get("outstandingDues")
+        or extra.get("statutoryDues")
+        or extra.get("dues")
+    )
+    if disclosed_dues:
+        disclosed_dues = str(disclosed_dues).strip()
+
+    financial_obligations: list[str] = []
+    if extra.get("otherObligations"):
+        raw_obs = extra.get("otherObligations")
+        if isinstance(raw_obs, list):
+            financial_obligations.extend(str(o) for o in raw_obs if o)
+        elif isinstance(raw_obs, str):
+            financial_obligations.append(raw_obs)
+    if extra.get("pendingElectricityDues"):
+        financial_obligations.append(f"Electricity dues: {extra.get('pendingElectricityDues')}")
+    if extra.get("societyMaintenanceDues"):
+        financial_obligations.append(f"Society maintenance: {extra.get('societyMaintenanceDues')}")
+
+    financial = FinancialIntelligence(
+        reserve_price=reserve_price,
+        emd=emd,
+        emd_percentage=emd_percentage,
+        property_area=area_sqft,
+        reserve_price_per_sqft=reserve_psf,
+        disclosed_outstanding_dues=disclosed_dues,
+        other_financial_obligations=financial_obligations,
+        market_valuation_status=MARKET_VALUATION_UNAVAILABLE_MESSAGE,
+    )
+
+    # Operational Auction Intelligence
+    contact_parts: list[str] = []
+    if extra.get("contactPerson"):
+        contact_parts.append(f"Officer: {extra.get('contactPerson')}")
+    if extra.get("contactPhone") or extra.get("phone"):
+        contact_parts.append(f"Phone: {extra.get('contactPhone') or extra.get('phone')}")
+    if extra.get("contactEmail") or extra.get("email"):
+        contact_parts.append(f"Email: {extra.get('contactEmail') or extra.get('email')}")
+    if extra.get("branchAddress"):
+        contact_parts.append(f"Branch: {extra.get('branchAddress')}")
+    contact_details = " | ".join(contact_parts) if contact_parts else None
+
+    inspection_window = None
+    if property.inspection_start or property.inspection_end:
+        s_str = property.inspection_start.strftime("%d-%b-%Y %I:%M %p") if property.inspection_start else ""
+        e_str = property.inspection_end.strftime("%d-%b-%Y %I:%M %p") if property.inspection_end else ""
+        inspection_window = f"{s_str} to {e_str}".strip(" to ")
+
+    platform = extra.get("auctionPlatform")
+    if not platform and property.listing_url:
+        platform = property.listing_url.split("/")[2] if "://" in property.listing_url else None
+
+    auction = AuctionIntelligenceDetails(
+        auction_date=property.auction_date,
+        auction_start=property.auction_start,
+        auction_end=property.auction_end,
+        emd_deadline=property.emd_deadline,
+        inspection_start=property.inspection_start,
+        inspection_end=property.inspection_end,
+        inspection_window=inspection_window,
+        auction_status=property.foreclosure_status or "scheduled",
+        bank_name=property.bank_name,
+        branch_name=property.branch_name,
+        contact_details=contact_details,
+        auction_platform=platform,
+    )
+
+    # Property and Legal Intelligence
+    possession_raw = property.possession_type or extra.get("possessionType") or extra.get("possession")
+    if possession_raw:
+        pos_lower = str(possession_raw).strip().lower()
+        if "physical" in pos_lower:
+            possession_type = "physical"
+        elif "symbolic" in pos_lower:
+            possession_type = "symbolic"
+        else:
+            possession_type = pos_lower
+    else:
+        possession_type = "not specified"
+
+    disclosed_encumbrances: list[str] = []
+    if extra.get("encumbrances"):
+        raw_enc = extra.get("encumbrances")
+        if isinstance(raw_enc, list):
+            disclosed_encumbrances.extend(str(e) for e in raw_enc if e)
+        else:
+            disclosed_encumbrances.append(str(raw_enc))
+
+    pending_litigation: list[str] = []
+    if extra.get("litigation") or extra.get("pendingLitigation"):
+        raw_lit = extra.get("litigation") or extra.get("pendingLitigation")
+        if isinstance(raw_lit, list):
+            pending_litigation.extend(str(l) for l in raw_lit if l)
+        else:
+            pending_litigation.append(str(raw_lit))
+
+    title_concerns: list[str] = []
+    if extra.get("titleConcerns"):
+        raw_tc = extra.get("titleConcerns")
+        if isinstance(raw_tc, list):
+            title_concerns.extend(str(t) for t in raw_tc if t)
+        else:
+            title_concerns.append(str(raw_tc))
+
+    property_discrepancies: list[str] = []
+    if extra.get("discrepancies"):
+        raw_disc = extra.get("discrepancies")
+        if isinstance(raw_disc, list):
+            property_discrepancies.extend(str(d) for d in raw_disc if d)
+        else:
+            property_discrepancies.append(str(raw_disc))
+
+    missing_documentation: list[str] = []
+    bank_conditions = [
+        "Sold on 'As is where is, as is what is, and whatever there is' basis",
+        "Successful bidder must deposit 25% of purchase price (inclusive of EMD) on same/next day",
+        "Balance 75% within 15 days of confirmation of sale",
+    ]
+    if extra.get("customConditions"):
+        raw_cc = extra.get("customConditions")
+        if isinstance(raw_cc, list):
+            bank_conditions.extend(str(c) for c in raw_cc if c)
+
+    legal = PropertyLegalIntelligence(
+        possession_type=possession_type,
+        disclosed_encumbrances=disclosed_encumbrances,
+        pending_litigation=pending_litigation,
+        title_concerns=title_concerns,
+        property_discrepancies=property_discrepancies,
+        missing_documentation=missing_documentation,
+        bank_conditions=bank_conditions,
+    )
+
+    assessment = evaluate_auction_assessment(
+        financial=financial,
+        auction=auction,
+        legal=legal,
+    )
+
+    return {
+        # Financial Intelligence
         "reserve_price": reserve_price,
         "emd": emd,
+        "emd_percentage": emd_percentage,
+        "area_sqft": area_sqft,
+        "reserve_price_per_sqft": reserve_psf,
+        "disclosed_outstanding_dues": disclosed_dues,
+        "other_financial_obligations": financial_obligations,
+        "market_valuation_status": MARKET_VALUATION_UNAVAILABLE_MESSAGE,
+        # Auction Intelligence
+        "auction_date": property.auction_date,
+        "auction_start": property.auction_start,
+        "auction_end": property.auction_end,
+        "emd_deadline": property.emd_deadline,
+        "inspection_start": property.inspection_start,
+        "inspection_end": property.inspection_end,
+        "inspection_window": inspection_window,
+        "auction_status": property.foreclosure_status or "scheduled",
+        "bank_name": property.bank_name,
+        "branch_name": property.branch_name,
+        "contact_details": contact_details,
+        "auction_platform": platform,
+        # Property and Legal Intelligence
+        "possession_type": possession_type,
+        "disclosed_encumbrances": disclosed_encumbrances,
+        "pending_litigation": pending_litigation,
+        "title_concerns": title_concerns,
+        "property_discrepancies": property_discrepancies,
+        "missing_documentation": missing_documentation,
+        "bank_conditions": bank_conditions,
+        # Transparent Assessment
+        "assessment_label": assessment.assessment_label,
+        "important_concerns": assessment.important_concerns,
+        "missing_information": assessment.missing_information,
+        "financial_considerations": assessment.financial_considerations,
+        "possession_concerns": assessment.possession_concerns,
+        "procedural_considerations": assessment.procedural_considerations,
+        "summary": assessment.summary,
+        # Legacy fields
+        "opening_bid": opening_bid,
+        "estimated_value": None,
         "discount_amount": None,
         "discount_percentage": None,
-        "price_per_sqft": None,
+        "price_per_sqft": reserve_psf,
         "potential_upside": None,
-        "risk_level": None,
+        "risk_level": 1,
         "deal_rating": None,
         "deal_score": None,
-        "valuation_confidence": valuation_confidence,
+        "valuation_confidence": None,
     }
-
-    # A lister's opening bid is not a substitute for a published reserve.
-    if estimated_value is None or estimated_value <= 0 or reserve_price is None:
-        return result
-
-    discount_amount, discount_percentage = calculate_discount(
-        estimated_value,
-        reserve_price,
-    )
-    price_per_sqft = calculate_price_per_sqft(
-        reserve_price,
-        property.area_sqft,
-    )
-
-    status = (
-        property.foreclosure_status.lower()
-        if property.foreclosure_status
-        else None
-    )
-    risk_level = FORECLOSURE_RISK_LEVELS.get(status, 2)
-    base_score = calculate_deal_score(discount_percentage, risk_level)
-    confidence_adjusted_score = calculate_confidence_adjusted_score(
-        base_score,
-        valuation_confidence,
-    )
-    deal_rating = calculate_deal_rating(discount_percentage)
-
-    result.update(
-        {
-            "discount_amount": discount_amount,
-            "discount_percentage": discount_percentage,
-            "price_per_sqft": price_per_sqft,
-            "potential_upside": discount_amount,
-            "risk_level": risk_level,
-            "deal_rating": deal_rating,
-            "deal_score": confidence_adjusted_score,
-        }
-    )
-    return result
 
 #It takes those facts and asks the LLM to interpret them.
 def analyze_property_with_ai(
@@ -611,65 +748,79 @@ def analyze_property_with_ai(
     )
 
 def get_property_summary(db: Session):
+    today_ist = get_current_ist_date()
+    today_start = datetime.combine(today_ist, datetime.min.time())
+
+    active_condition = and_(
+        or_(
+            Property.foreclosure_status.is_(None),
+            func.lower(Property.foreclosure_status).notin_(["sold", "cancelled"]),
+        ),
+        or_(
+            Property.auction_date >= today_ist,
+            and_(
+                Property.auction_date.is_(None),
+                Property.auction_end.is_not(None),
+                Property.auction_end >= today_start,
+            ),
+            and_(
+                Property.auction_date.is_(None),
+                Property.auction_end.is_(None),
+            ),
+        ),
+    )
+
     total_properties = (
         db.query(func.count(Property.id)).scalar() or 0
     )
 
     upcoming_auctions = (
         db.query(func.count(Property.id))
-        .filter(
-            Property.auction_date >= date.today(),
-            Property.foreclosure_status.in_(
-                ["scheduled", "upcoming", "active"]
-            ),
-        )
-        .scalar()
-        or 0
-    )
-
-    latest_valuation_ids = (
-        db.query(
-            PropertyValuation.property_id,
-            func.max(PropertyValuation.id).label("latest_id"),
-        )
-        .filter(
-            PropertyValuation.source == "market_comparables",
-            PropertyValuation.valuation_method == "residential_comparable_sales",
-        )
-        .group_by(PropertyValuation.property_id)
-        .subquery()
-    )
-    properties_with_estimates = (
-        db.query(func.count(Property.id))
-        .join(
-            latest_valuation_ids,
-            latest_valuation_ids.c.property_id == Property.id,
-        )
-        .join(
-            PropertyValuation,
-            PropertyValuation.id == latest_valuation_ids.c.latest_id,
-        )
-        .filter(
-            Property.reserve_price.is_not(None),
-            PropertyValuation.estimated_value > 0,
-            Property.reserve_price < PropertyValuation.estimated_value,
-        )
+        .filter(active_condition)
         .scalar()
         or 0
     )
 
     residential = (
         db.query(func.count(Property.id))
-        .filter(func.lower(Property.property_type) == "residential")
+        .filter(
+            active_condition,
+            or_(
+                func.lower(Property.property_type).ilike("%residential%"),
+                func.lower(Property.property_type).ilike("%flat%"),
+                func.lower(Property.property_type).ilike("%house%"),
+                func.lower(Property.property_type).ilike("%apartment%"),
+                func.lower(Property.property_type).ilike("%villa%"),
+                func.lower(Property.property_type).ilike("%duplex%"),
+            ),
+            ~func.lower(Property.property_type).ilike("%commercial%"),
+            ~func.lower(Property.property_type).ilike("%industrial%"),
+            ~func.lower(Property.property_type).ilike("%shop%"),
+            ~func.lower(Property.property_type).ilike("%office%"),
+            ~func.lower(Property.property_type).ilike("%factory%"),
+            ~func.lower(Property.property_type).ilike("%warehouse%"),
+        )
         .scalar()
         or 0
     )
+
     commercial = (
         db.query(func.count(Property.id))
-        .filter(func.lower(Property.property_type) == "commercial")
+        .filter(
+            active_condition,
+            or_(
+                func.lower(Property.property_type).ilike("%commercial%"),
+                func.lower(Property.property_type).ilike("%industrial%"),
+                func.lower(Property.property_type).ilike("%shop%"),
+                func.lower(Property.property_type).ilike("%office%"),
+                func.lower(Property.property_type).ilike("%factory%"),
+                func.lower(Property.property_type).ilike("%warehouse%"),
+            ),
+        )
         .scalar()
         or 0
     )
+
     sold = (
         db.query(func.count(Property.id))
         .filter(func.lower(Property.foreclosure_status) == "sold")
@@ -680,8 +831,56 @@ def get_property_summary(db: Session):
     return {
         "total_properties": total_properties,
         "upcoming_auctions": upcoming_auctions,
-        "properties_with_estimates": properties_with_estimates,
+        "properties_with_estimates": 0,
         "residential": residential,
         "commercial": commercial,
         "sold": sold,
     }
+
+
+def delete_expired_properties(
+    db: Session,
+    as_of_date: date | None = None,
+) -> int:
+    """
+    Delete all properties whose auction date has expired (strictly before as_of_date, defaults to today).
+    Cascades deletion to dependent child records (PropertyDocument, PropertyValuation, Evidence)
+    to maintain relational integrity without leaving orphaned records.
+    Returns the count of deleted properties.
+    """
+    if as_of_date is None:
+        as_of_date = date.today()
+
+    expired_props = (
+        db.query(Property)
+        .filter(
+            or_(
+                and_(Property.auction_date.is_not(None), Property.auction_date < as_of_date),
+                and_(
+                    Property.auction_date.is_(None),
+                    Property.auction_end.is_not(None),
+                    Property.auction_end < datetime.combine(as_of_date, datetime.min.time()),
+                ),
+            )
+        )
+        .all()
+    )
+
+    if not expired_props:
+        return 0
+
+    expired_ids = [p.id for p in expired_props]
+
+    # Delete foreign key references in child tables
+    db.query(Evidence).filter(Evidence.property_id.in_(expired_ids)).delete(synchronize_session=False)
+    db.query(PropertyValuation).filter(PropertyValuation.property_id.in_(expired_ids)).delete(synchronize_session=False)
+    db.query(PropertyDocument).filter(PropertyDocument.property_id.in_(expired_ids)).delete(synchronize_session=False)
+
+    deleted_count = (
+        db.query(Property)
+        .filter(Property.id.in_(expired_ids))
+        .delete(synchronize_session=False)
+    )
+
+    db.commit()
+    return deleted_count

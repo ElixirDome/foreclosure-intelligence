@@ -17,9 +17,11 @@ def _create_property(client, *, address="Test Property", **overrides):
         "bedrooms": 3,
         "bathrooms": 2,
         "area_sqft": 1500,
-        "auction_date": "2026-08-22",
+        "auction_date": "2026-12-15",
         "foreclosure_status": "active",
         "opening_bid": 60000,
+        "reserve_price": 60000,
+        "emd": 6000,
         "property_type": "single_family",
     }
     payload.update(overrides)
@@ -73,53 +75,55 @@ def test_create_property_invalid_foreclosure_status(client):
 
 
 def test_property_analysis(client, db):
-    response = _create_property(client, address="123 Analysis Street")
+    response = _create_property(client, address="123 Analysis Street", area_sqft=1000)
     assert response.status_code == 201
     property_id = response.json()["id"]
-    _record_test_valuation(db, property_id)
 
     analysis_response = client.get(f"/properties/{property_id}/analysis")
     assert analysis_response.status_code == 200
     analysis = analysis_response.json()
-    assert analysis["discount_amount"] == 30000
-    assert analysis["discount_percentage"] == pytest.approx(33.333333333333336)
-    assert analysis["deal_score"] == pytest.approx(23.333333333333336)
+    assert analysis["reserve_price"] == 60000.0
+    assert analysis["emd"] == 6000.0
+    assert analysis["emd_percentage"] == pytest.approx(10.0)
+    assert analysis["reserve_price_per_sqft"] == pytest.approx(60.0)
+    assert "Market valuation unavailable" in analysis["market_valuation_status"]
+    assert "assessment_label" in analysis
 
 
-def test_property_analysis_rejects_missing_automated_estimate(client):
+def test_property_analysis_does_not_require_unverified_comparables(client):
     response = _create_property(client, address="123 Unvalued Street")
     assert response.status_code == 201
 
     analysis_response = client.get(
         f"/properties/{response.json()['id']}/analysis"
     )
-    assert analysis_response.status_code == 400
-    assert analysis_response.json()["detail"] == (
-        "Deal analysis requires an automated comparable-based valuation"
+    assert analysis_response.status_code == 200
+    data = analysis_response.json()
+    assert data["market_valuation_status"] == (
+        "Market valuation unavailable — verified comparable transaction data is not available."
     )
 
 
-def test_property_analysis_rejects_missing_reserve_price(client, db):
+def test_property_analysis_with_missing_reserve_price(client, db):
     response = _create_property(
         client,
         address="123 Missing Reserve Street",
+        reserve_price=None,
+        emd=None,
         opening_bid=60000,
     )
     assert response.status_code == 201
     property_id = response.json()["id"]
-    _record_test_valuation(db, property_id, set_reserve_price=False)
 
     analysis_response = client.get(f"/properties/{property_id}/analysis")
-    assert analysis_response.status_code == 400
-    assert analysis_response.json()["detail"] == (
-        "Deal analysis requires reserve_price"
-    )
+    assert analysis_response.status_code == 200
+    analysis = analysis_response.json()
+    assert analysis["assessment_label"] == "Insufficient information"
 
 
 def test_list_properties(client, db):
-    response = _create_property(client, address="123 List Street")
+    response = _create_property(client, address="123 List Street", area_sqft=1000)
     assert response.status_code == 201
-    _record_test_valuation(db, response.json()["id"])
 
     response = client.get("/properties/")
     assert response.status_code == 200
@@ -130,8 +134,9 @@ def test_list_properties(client, db):
     assert data["pages"] == 1
     assert len(data["items"]) == 1
     assert data["items"][0]["address"] == "123 List Street"
-    assert data["items"][0]["discount_percentage"] == pytest.approx(33.333333333333336)
-    assert data["items"][0]["deal_score"] == pytest.approx(23.333333333333336)
+    assert data["items"][0]["reserve_price"] == 60000.0
+    assert data["items"][0]["reserve_price_per_sqft"] == pytest.approx(60.0)
+    assert data["items"][0]["emd_percentage"] == pytest.approx(10.0)
 
 
 def test_list_properties_filters_by_foreclosure_status(client):
@@ -143,22 +148,6 @@ def test_list_properties_filters_by_foreclosure_status(client):
     data = response.json()
     assert data["total"] == 1
     assert data["items"][0]["address"] == "Active Property"
-
-
-def test_list_properties_filters_by_discount(client, db):
-    good = _create_property(client, address="Good Deal", opening_bid=50000)
-    small = _create_property(client, address="Small Deal", opening_bid=90000)
-    assert good.status_code == 201
-    assert small.status_code == 201
-
-    for response in (good, small):
-        _record_test_valuation(db, response.json()["id"], 100000)
-
-    response = client.get("/properties/", params={"min_discount": 30})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["total"] == 1
-    assert data["items"][0]["address"] == "Good Deal"
 
 
 def test_analyze_property_with_ai(client, fake_llm_provider, db):
@@ -195,3 +184,86 @@ def test_property_ai_analysis(client, fake_llm_provider):
     assert data["risks"] == ["Foreclosure risk"]
     assert data["due_diligence"] == ["Review foreclosure documents"]
     assert data["recommendation"] == "Investigate further."
+
+
+def test_residential_filter_excludes_commercial_properties(client, db):
+    # Create residential property
+    res_resp = _create_property(
+        client,
+        address="101 Rose Avenue, Gurdaspur",
+        property_type="Residential Flat",
+        city="Gurdaspur",
+    )
+    assert res_resp.status_code == 201
+
+    # Create commercial property
+    comm_resp = _create_property(
+        client,
+        address="Commercial Complex Sector 4, Gurdaspur",
+        property_type="Commercial Shop",
+        city="Gurdaspur",
+    )
+    assert comm_resp.status_code == 201
+
+    # Query with property_type=residential
+    res_query = client.get("/properties/?property_type=residential&city=Gurdaspur")
+    assert res_query.status_code == 200
+    res_items = res_query.json()["items"]
+    res_types = [item["property_type"] for item in res_items]
+
+    # Verify no commercial property leaked into residential results
+    assert all("commercial" not in (t or "").lower() for t in res_types)
+    assert any("Rose Avenue" in item["address"] for item in res_items)
+    assert not any("Commercial Complex" in item["address"] for item in res_items)
+
+
+def test_location_and_property_type_combined_filtering(client, db):
+    _create_property(
+        client,
+        address="55 Palm Grove, Ghaziabad",
+        property_type="Residential House",
+        city="Ghaziabad",
+    )
+    _create_property(
+        client,
+        address="22 Mill Road, Amritsar",
+        property_type="Residential House",
+        city="Amritsar",
+    )
+
+    # Filter by city + residential
+    resp = client.get("/properties/?city=Ghaziabad&property_type=residential")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) >= 1
+    assert all(item["city"] == "Ghaziabad" for item in items if item.get("city"))
+    assert not any(item.get("city") == "Amritsar" for item in items)
+
+
+def test_get_properties_deterministic_financial_fields(client, db):
+    """SQL list properties returns reserve price per sq ft and EMD percentage."""
+    from app.models import Property
+
+    prop = Property(
+        user_id=1,
+        address="99 Concourse Way, Gurdaspur",
+        city="Gurdaspur",
+        reserve_price=2000000.0,
+        emd=200000.0,
+        area_sqft=1000,
+        foreclosure_status="scheduled",
+        property_key="99_concourse_way",
+    )
+    db.add(prop)
+    db.commit()
+
+    resp = client.get(f"/properties/?search=Concourse")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["reserve_price"] == 2000000.0
+    assert items[0]["emd"] == 200000.0
+    assert items[0]["emd_percentage"] == pytest.approx(10.0)
+    assert items[0]["reserve_price_per_sqft"] == pytest.approx(2000.0)
+
+

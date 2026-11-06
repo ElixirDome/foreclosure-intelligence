@@ -1,13 +1,24 @@
+import os
 import re
 import tempfile
+import time
 from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
 from app.services.property_classifier import is_residential_property
 from app.ingestion.base import SourceAdapter
+from app.services.pdf import extract_pages_from_pdf
 from app.services.pnb_extraction import extract_pnb_property
 from app.services.pnb_extraction import extract_pnb_properties
+from app.services.live_events import broker
+
+NON_PROPERTY_KEYWORDS = (
+    "vehicle", "vehicles", "car", "cars", "bus", "buses", "truck", "trucks",
+    "tractor", "tractors", "scrap", "furniture", "stationery", "computer", "printer",
+    "dead stock", "air conditioner", "generator", "two wheeler", "four wheeler",
+    "almirah", "old tyre", "unserviceable",
+)
 
 
 class PNBSourceAdapter(SourceAdapter):
@@ -55,6 +66,7 @@ class PNBSourceAdapter(SourceAdapter):
         # ---------------------------------------------------------
 
         auction_items = []
+        seen_targets: set[tuple[str, str]] = set()
 
         for row in soup.find_all("tr"):
             postback_link = row.find(
@@ -66,8 +78,17 @@ class PNBSourceAdapter(SourceAdapter):
                 continue
 
             title = postback_link.get_text(" ", strip=True) or "Untitled PNB auction document"
+            clean_title = title.strip()
 
-            if not title:
+            if not clean_title:
+                continue
+
+            # Skip pagination numbers and navigation controls (e.g., "1", "2", "...", "Next")
+            if (
+                clean_title.isdigit()
+                or len(clean_title) <= 2
+                or clean_title.lower() in {"next", "prev", "previous", "first", "last", "...", "more", "select"}
+            ):
                 continue
 
             href = postback_link.get(
@@ -83,9 +104,14 @@ class PNBSourceAdapter(SourceAdapter):
             if match is None:
                 continue
 
+            target_pair = (match.group(1), match.group(2))
+            if target_pair in seen_targets:
+                continue
+            seen_targets.add(target_pair)
+
             auction_items.append(
                 {
-                    "title": title,
+                    "title": clean_title,
                     "event_target": match.group(1),
                     "event_argument": match.group(2),
                 }
@@ -112,7 +138,7 @@ class PNBSourceAdapter(SourceAdapter):
                 f"{title}"
             )
 
-            # We currently only want property-sale notices.
+            # We currently only want real estate / property-sale notices.
             title_lower = (title or "").lower()
 
             if (
@@ -122,6 +148,24 @@ class PNBSourceAdapter(SourceAdapter):
             ):
                 print("  Skipping: not a sale/auction notice")
                 continue
+
+            # Exclude movable assets / non-real-estate notices (vehicles, scrap, etc.)
+            if any(kw in title_lower for kw in NON_PROPERTY_KEYWORDS):
+                print("  Skipping: movable asset / non-property notice")
+                continue
+
+            # Emit granular SSE progress for live UI update
+            broker.publish(
+                "ingestion_status",
+                {
+                    "source": "PNBSourceAdapter",
+                    "stage": "downloading_pdf",
+                    "current": index,
+                    "total": len(auction_items),
+                    "item_title": title,
+                    "timestamp": time.time(),
+                },
+            )
 
             post_data = form_data.copy()
 
@@ -190,9 +234,41 @@ class PNBSourceAdapter(SourceAdapter):
 
         return downloaded_items
 
-    def extract(self, item):
-        text = self._extract_ocr_text(item["pdf_path"])
+    def _get_pages(self, item_or_path):
+        if isinstance(item_or_path, dict) and item_or_path.get("pages"):
+            return item_or_path["pages"]
+        path = item_or_path.get("pdf_path") if isinstance(item_or_path, dict) else item_or_path
+        pages = extract_pages_from_pdf(path)
+        if isinstance(item_or_path, dict):
+            item_or_path["pages"] = pages
+            item_or_path["_extracted_text"] = "\n".join(pages).strip()
+        return pages
 
+    def _get_text(self, item_or_path):
+        if isinstance(item_or_path, dict) and item_or_path.get("_extracted_text"):
+            return item_or_path["_extracted_text"]
+        pages = self._get_pages(item_or_path)
+        text = "\n".join(pages).strip()
+        if isinstance(item_or_path, dict):
+            item_or_path["_extracted_text"] = text
+        return text
+
+    def extract(self, item):
+        title = item.get("title", "")
+        broker.publish(
+            "ingestion_status",
+            {
+                "source": "PNBSourceAdapter",
+                "stage": "extracting_text",
+                "item_title": title,
+                "timestamp": time.time(),
+            },
+        )
+        text = self._get_text(item)
+        print("\n--- OCR TEXT SAMPLE ---")
+        print(repr(text[:2500]))
+        print("--- END OCR SAMPLE ---\n")
+    
         properties = extract_pnb_properties(text)
 
         if not properties:
@@ -224,15 +300,60 @@ class PNBSourceAdapter(SourceAdapter):
         return valid_properties
 
     def get_documents(self, item):
+        content = b""
+        if "pdf_path" in item and Path(item["pdf_path"]).exists():
+            content = Path(item["pdf_path"]).read_bytes()
         return [
             {
                 "source_name": "PNB",
                 "source_url": item["source_url"],
                 "document_type": "auction_notice",
                 "title": item["title"],
-                "content": item["pdf_path"].read_bytes(),
+                "content": content,
+                "storage_path": str(item["pdf_path"]) if "pdf_path" in item else None,
+                "pages": item.get("pages"),
+                "extracted_text": item.get("_extracted_text"),
             }
         ]
+
+    def get_evidence(self, item):
+        text = self._get_text(item)
+        properties = extract_pnb_properties(text) or []
+        evidence = []
+        for prop in properties:
+            if prop.get("address"):
+                evidence.append({
+                    "field": "address",
+                    "value": prop["address"],
+                    "source_text": prop["address"][:200],
+                    "extraction_method": "regex_structured",
+                    "confidence": 0.95,
+                })
+            if prop.get("reserve_price") is not None:
+                evidence.append({
+                    "field": "reserve_price",
+                    "value": str(prop["reserve_price"]),
+                    "source_text": f"Reserve Price: {prop['reserve_price']}",
+                    "extraction_method": "regex_structured",
+                    "confidence": 0.95,
+                })
+            if prop.get("emd") is not None:
+                evidence.append({
+                    "field": "emd",
+                    "value": str(prop["emd"]),
+                    "source_text": f"EMD: {prop['emd']}",
+                    "extraction_method": "regex_structured",
+                    "confidence": 0.95,
+                })
+            if prop.get("auction_date"):
+                evidence.append({
+                    "field": "auction_date",
+                    "value": str(prop["auction_date"]),
+                    "source_text": f"Auction Date: {prop['auction_date']}",
+                    "extraction_method": "regex_structured",
+                    "confidence": 0.95,
+                })
+        return evidence
 
     def _extract_ocr_text(self, pdf_path):
         import time
@@ -244,10 +365,21 @@ class PNBSourceAdapter(SourceAdapter):
 
         print("  [1/3] Rendering PDF...")
 
+        configured_poppler = os.getenv("POPPLER_PATH")
+        if not configured_poppler:
+            # Preserve the developer's existing Windows setup when present,
+            # but do not require that machine-specific path elsewhere.
+            default_poppler = Path(
+                r"C:\Dev\poppler-26.09.0\Library\bin"
+            )
+            configured_poppler = (
+                str(default_poppler) if default_poppler.is_dir() else None
+            )
+
         pages = convert_from_path(
             pdf_path,
             dpi=200,
-            poppler_path=r"C:\Dev\poppler-26.09.0\Library\bin",
+            poppler_path=configured_poppler,
         )
 
         print(
