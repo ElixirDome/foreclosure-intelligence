@@ -23,10 +23,12 @@ const GENERAL_PROMPTS = [
 ];
 
 const PROPERTY_PROMPTS = [
-  "What is this property's estimated market value?",
-  "How was the property value calculated?",
-  "What are its EMD and reserve price?",
-  "Show me the original auction notice for this property",
+  "Is this a good deal?",
+  "How is it a good deal?",
+  "What should I look for & red flags?",
+  "Are there people possessing the property?",
+  "Are there any liens or encumbrances?",
+  "What is the proper address & boundaries?",
 ];
 
 export default function ChatBot() {
@@ -171,28 +173,15 @@ export default function ChatBot() {
                 <span className="analyst-title">Research Analyst</span>
                 <span className="analyst-live-pill">Multi-Source RAG</span>
               </div>
-              {activePropertyId ? (
-                <div className="analyst-scope-tag">
-                  <span>Scoped to {activePropertyAddress || `Lot #${activePropertyId}`}</span>
-                  <button
-                    type="button"
-                    className="scope-clear-btn"
-                    onClick={clearPropertyScope}
-                    title="Clear property focus to search across all inventory"
-                  >
-                    Clear
-                  </button>
-                </div>
-              ) : (
-                <span className="analyst-subtitle">Portfolio & Macro Discovery Mode</span>
-              )}
+              <span className="analyst-subtitle">Foreclosure Due Diligence & Underwriting</span>
             </div>
 
             <div className="analyst-header-actions">
               <button
                 type="button"
                 className="analyst-tool-btn"
-                onClick={() =>
+                onClick={() => {
+                  clearPropertyScope();
                   setMessages([
                     {
                       id: "intro_reset",
@@ -200,8 +189,8 @@ export default function ChatBot() {
                       text: "Chat cleared. What property or auction market would you like to explore?",
                       timestamp: "Just now",
                     },
-                  ])
-                }
+                  ]);
+                }}
                 title="Clear conversation"
               >
                 Clear
@@ -319,8 +308,18 @@ export default function ChatBot() {
                       )}
 
                       {/* Action Links Buttons */}
-                      {actionCitations.length > 0 && (
+                      {(actionCitations.length > 0 || ((activePropertyId || m.property_id) && m.role === "assistant")) && (
                         <div className="analyst-action-bar">
+                          {(activePropertyId || m.property_id) && m.role === "assistant" && (
+                            <button
+                              type="button"
+                              className="analyst-action-pill"
+                              style={{ cursor: "pointer", background: "none", border: "1px solid var(--border-color, #dbdbdb)", fontWeight: 500 }}
+                              onClick={() => sendMessage(`Provide a full deep investment and risk analysis for Lot #${m.property_id || activePropertyId}`)}
+                            >
+                              Deep Analysis →
+                            </button>
+                          )}
                           {actionCitations.map((act, idx) => {
                             const targetUrl = act.source_id || "/dashboard";
                             const isDocumentFile = targetUrl.startsWith("/documents/") || targetUrl.includes("/file");

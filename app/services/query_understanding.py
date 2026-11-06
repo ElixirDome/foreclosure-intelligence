@@ -30,6 +30,10 @@ class QueryIntent(str, Enum):
     INVENTORY_DISCOVERY = "inventory_discovery"
     FOLLOW_UP = "follow_up"
     INVESTIGATIVE_UNDERWRITING = "investigative_underwriting"
+    PROPERTY_DEAL_INQUIRY = "property_deal_inquiry"
+    PROPERTY_POSSESSION_INQUIRY = "property_possession_inquiry"
+    PROPERTY_LIENS_INQUIRY = "property_liens_inquiry"
+    PROPERTY_ADDRESS_INQUIRY = "property_address_inquiry"
 
 
 @dataclass
@@ -423,6 +427,108 @@ def classify_query(
             intent=QueryIntent.DOCUMENT_RETRIEVAL,
             cleaned_query=q_clean,
             property_id=resolved_prop_id,
+            requires_retrieval=False,
+        )
+
+    # 12. Property Possession Inquiry
+    if any(k in q_lower for k in [
+        "possessing", "possession", "occupant", "occupants", "occupy",
+        "occupying", "living there", "tenant", "tenants", "vacant",
+        "who possesses", "who lives", "who is staying", "is someone living",
+        "people currently possessing",
+    ]):
+        if resolved_prop_id:
+            return QueryUnderstandingResult(
+                intent=QueryIntent.PROPERTY_POSSESSION_INQUIRY,
+                cleaned_query=q_clean,
+                property_id=resolved_prop_id,
+                requires_retrieval=False,
+            )
+        info = TERMINOLOGY_KNOWLEDGE.get("possession", {})
+        return QueryUnderstandingResult(
+            intent=QueryIntent.TERMINOLOGY,
+            cleaned_query=q_clean,
+            property_id=None,
+            direct_answer=info.get("answer", "Under SARFAESI, banks auction properties under either Symbolic or Physical Possession."),
+            action_links=list(DEFAULT_SUGGESTED_ACTIONS),
+            requires_retrieval=False,
+        )
+
+    # 13. Property Liens & Encumbrances Inquiry
+    if any(k in q_lower for k in [
+        "lien", "liens", "encumbrance", "encumbrances", "prior charge", "statutory dues",
+        "unpaid tax", "tax dues", "utility dues", "electricity dues", "clean title",
+        "title clear", "any liens",
+    ]):
+        if resolved_prop_id:
+            return QueryUnderstandingResult(
+                intent=QueryIntent.PROPERTY_LIENS_INQUIRY,
+                cleaned_query=q_clean,
+                property_id=resolved_prop_id,
+                requires_retrieval=False,
+            )
+        return QueryUnderstandingResult(
+            intent=QueryIntent.FOLLOW_UP,
+            cleaned_query=q_clean,
+            property_id=None,
+            direct_answer=(
+                "Bank foreclosure properties are sold on an 'as is where is' basis. "
+                "To audit liens, prior mortgages, and statutory dues for a specific listing, "
+                "please mention the lot number (e.g. 'Are there any liens on Lot #1?')."
+            ),
+            action_links=list(DEFAULT_SUGGESTED_ACTIONS),
+            requires_retrieval=False,
+        )
+
+    # 14. Proper Address & Boundaries Inquiry
+    if any(k in q_lower for k in [
+        "proper address", "exact address", "where is it located", "boundaries",
+        "boundary", "survey number", "khasra", "khatian", "dag no", "plot no",
+        "plot number", "location details", "full address", "exact location",
+        "what is the address", "where is the property", "what is the proper address",
+    ]):
+        if resolved_prop_id:
+            return QueryUnderstandingResult(
+                intent=QueryIntent.PROPERTY_ADDRESS_INQUIRY,
+                cleaned_query=q_clean,
+                property_id=resolved_prop_id,
+                requires_retrieval=False,
+            )
+        return QueryUnderstandingResult(
+            intent=QueryIntent.FOLLOW_UP,
+            cleaned_query=q_clean,
+            property_id=None,
+            direct_answer=(
+                "To view the exact legal address, survey/khasra numbers, and boundaries, "
+                "please specify the property lot number (e.g. 'What is the proper address for Lot #1?')."
+            ),
+            action_links=list(DEFAULT_SUGGESTED_ACTIONS),
+            requires_retrieval=False,
+        )
+
+    # 15. Deal Quality & What to Look For Inquiry
+    if any(k in q_lower for k in [
+        "good deal", "how is it a good deal", "is this a good deal", "good investment",
+        "should i buy", "what should i look for", "is it worth it", "deal score",
+        "deal rating", "red flag", "red flags", "pros and cons", "investment potential",
+        "why is it a good deal", "how good is this deal",
+    ]):
+        if resolved_prop_id:
+            return QueryUnderstandingResult(
+                intent=QueryIntent.PROPERTY_DEAL_INQUIRY,
+                cleaned_query=q_clean,
+                property_id=resolved_prop_id,
+                requires_retrieval=False,
+            )
+        return QueryUnderstandingResult(
+            intent=QueryIntent.FOLLOW_UP,
+            cleaned_query=q_clean,
+            property_id=None,
+            direct_answer=(
+                "To evaluate whether an auction is a good deal and review red flags, "
+                "please specify which property lot number you'd like to analyze (e.g. 'Is Lot #1 a good deal?')."
+            ),
+            action_links=list(DEFAULT_SUGGESTED_ACTIONS),
             requires_retrieval=False,
         )
 

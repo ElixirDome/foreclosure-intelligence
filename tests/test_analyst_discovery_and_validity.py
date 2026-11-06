@@ -237,3 +237,40 @@ def test_gemini_provider_generate(monkeypatch):
     assert result.summary == "Solid deal"
     assert "Good location" in result.strengths
     assert "Symbolic possession" in result.risks
+
+
+def test_analyst_deal_inquiry(db):
+    """User asking 'is this a good deal' or 'how is it a good deal' receives concise deal assessment."""
+    res = process_analyst_turn(db, "is this a good deal", property_id=1)
+    assert res.intent == "property_deal_inquiry"
+    assert "Deal Assessment" in res.answer
+    assert "Deal Score" in res.answer
+    assert "What to Look For" in res.answer
+    assert any("Details" in a["title"] for a in res.action_links)
+
+
+def test_analyst_possession_inquiry(db):
+    """User asking about people possessing the property gets clear physical vs symbolic answer."""
+    res = process_analyst_turn(db, "are there people currently possessing the property", property_id=1)
+    assert res.intent == "property_possession_inquiry"
+    assert "Possession Status" in res.answer
+    assert "Symbolic Possession" in res.answer or "Physical Possession" in res.answer
+    assert "Section 14" in res.answer
+
+
+def test_analyst_liens_inquiry(db):
+    """User asking about liens and encumbrances receives notice audit and EC advice."""
+    res = process_analyst_turn(db, "are there any liens on this property", property_id=1)
+    assert res.intent == "property_liens_inquiry"
+    assert "Liens and Encumbrances" in res.answer
+    assert "As is where is" in res.answer
+    assert "Encumbrance Certificate" in res.answer
+
+
+def test_analyst_address_inquiry(db):
+    """User asking for the proper address and boundaries receives verified location details."""
+    res = process_analyst_turn(db, "what is the proper address and boundaries", property_id=1)
+    assert res.intent == "property_address_inquiry"
+    assert "Legal Property Location" in res.answer
+    assert "Tugalwal" in res.answer
+    assert "Official Address" in res.answer

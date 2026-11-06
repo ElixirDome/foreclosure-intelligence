@@ -186,6 +186,22 @@ def process_analyst_turn(
     if u_result.intent == QueryIntent.DOCUMENT_RETRIEVAL:
         return _handle_original_document_inquiry(db, resolved_prop_id, q_clean)
 
+    # 10b. Property Deal & Underwriting Evaluation
+    if u_result.intent == QueryIntent.PROPERTY_DEAL_INQUIRY and resolved_prop_id:
+        return _handle_deal_inquiry(db, resolved_prop_id, q_clean)
+
+    # 10c. Property Possession & Occupancy
+    if u_result.intent == QueryIntent.PROPERTY_POSSESSION_INQUIRY and resolved_prop_id:
+        return _handle_possession_inquiry(db, resolved_prop_id, q_clean)
+
+    # 10d. Property Liens & Encumbrances
+    if u_result.intent == QueryIntent.PROPERTY_LIENS_INQUIRY and resolved_prop_id:
+        return _handle_liens_inquiry(db, resolved_prop_id, q_clean)
+
+    # 10e. Property Proper Address & Boundaries
+    if u_result.intent == QueryIntent.PROPERTY_ADDRESS_INQUIRY and resolved_prop_id:
+        return _handle_address_inquiry(db, resolved_prop_id, q_clean)
+
     # 11. Inventory Discovery / Location-Aware Search
     if u_result.intent == QueryIntent.INVENTORY_DISCOVERY:
         return _handle_discovery_search(db, q_clean, q_lower, user_pref)
@@ -782,6 +798,390 @@ def _handle_original_document_inquiry(db: Session, property_id: int, question: s
         citations=citations,
         action_links=action_links,
         intent="document_retrieval",
+    )
+
+
+def _handle_deal_inquiry(db: Session, property_id: int, question: str) -> AnalystResponse:
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+        )
+
+    deal = build_deal_intelligence(db, property_id)
+    score = deal.deal_score if deal else None
+    rating = (deal.deal_rating if deal else None) or "Moderate"
+    discount = deal.discount_percentage if deal else None
+
+    reserve_str = f"Rs. {prop.reserve_price:,.2f}" if prop.reserve_price else "Not stated"
+    emd_str = f"Rs. {prop.emd:,.2f}" if prop.emd else "Not stated"
+    est_val_str = f"Rs. {deal.estimated_value:,.2f}" if (deal and deal.estimated_value) else "Benchmark pending"
+
+    lines = [
+        f"### Deal Assessment: Lot #{prop.id}",
+        f"Address: {prop.address}",
+        "",
+        f"Verdict: {'Favorable opportunity' if score and score >= 65 else 'Moderate prospective deal with due diligence required'}.",
+        f"Deal Score: {f'{score:.0f}/100 ({rating})' if score is not None else 'N/A'}",
+        f"Reserve Price: {reserve_str} vs Estimated Value: {est_val_str}" + (f" ({discount:.1f}% discount)" if discount else ""),
+        f"Earnest Money Deposit (EMD): {emd_str}",
+        "",
+        "Key Strengths:",
+    ]
+    if deal and deal.factors:
+        strengths = [f.label for f in deal.factors if f.direction == "+"]
+        if strengths:
+            lines.extend(f"• {s}" for s in strengths[:2])
+        else:
+            lines.append("• Public auction listing under SARFAESI Act")
+    else:
+        lines.append("• Public auction listing under SARFAESI Act")
+
+    lines.extend([
+        "",
+        "What to Look For (Key Red Flags):",
+        "• Possession Status: Verify whether the bank holds physical keys or only symbolic enforcement.",
+        "• Title and Dues: Check for unpaid municipal taxes, electricity arrears, and obtain a 30-year Encumbrance Certificate.",
+        "",
+        "Bottom Line: " + (deal.explanation if deal and deal.explanation else "Favorable entry price relative to market benchmark. Verify physical possession and confirm clear title before bidding."),
+    ])
+
+    action_links = [
+        {"title": f"View Full Property #{prop.id} Details", "url": f"/properties/{prop.id}"},
+        {"title": "Deep Due Diligence Analysis", "url": f"/properties/{prop.id}"},
+    ]
+    pdoc = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).first()
+    if pdoc:
+        action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{pdoc.document_id}/file"})
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=[
+            Citation(
+                kind="property",
+                source_id=f"prop:{prop.id}",
+                title=f"Property Listing #{prop.id}: {prop.address}",
+                excerpt=f"Reserve: {reserve_str}, EMD: {emd_str}, Score: {score}, Discount: {discount}%",
+                score=1.0,
+                property_id=property_id,
+            )
+        ],
+        action_links=action_links,
+        intent="property_deal_inquiry",
+    )
+
+
+def _handle_possession_inquiry(db: Session, property_id: int, question: str) -> AnalystResponse:
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+        )
+
+    pdocs = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).all()
+    doc_ids = [pd.document_id for pd in pdocs]
+
+    possession_type = "Symbolic Possession"
+    possession_excerpt = ""
+    target_doc = None
+    target_chunk = None
+
+    if doc_ids:
+        chunks = (
+            db.query(
+                DocumentChunk.id,
+                DocumentChunk.page_number,
+                DocumentChunk.text,
+                Document.id.label("doc_id"),
+                Document.title,
+                Document.filename,
+                Document.source_name,
+            )
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .filter(DocumentChunk.document_id.in_(doc_ids))
+            .all()
+        )
+        for chunk_id, page_no, text, doc_id, doc_title, filename, s_name in chunks:
+            c_text_lower = text.lower()
+            if "physical possession" in c_text_lower:
+                possession_type = "Physical Possession"
+                possession_excerpt = text[:300]
+                target_doc = (doc_id, doc_title, filename, s_name)
+                target_chunk = (chunk_id, page_no)
+                break
+            elif "symbolic possession" in c_text_lower or "constructive possession" in c_text_lower or "section 13(4)" in c_text_lower:
+                possession_type = "Symbolic Possession"
+                possession_excerpt = text[:300]
+                target_doc = (doc_id, doc_title, filename, s_name)
+                target_chunk = (chunk_id, page_no)
+
+    if possession_type == "Physical Possession":
+        desc = (
+            "The bank has taken Physical Possession of the property under the SARFAESI Act. "
+            "The premises are under bank locks or seals. However, conduct an in-person site inspection "
+            "to verify vacant status and ensure no unauthorized occupants or trespassers."
+        )
+    else:
+        desc = (
+            "The property is under Symbolic Possession (Section 13(4) of the SARFAESI Act). "
+            "The bank holds legal enforcement rights, but does not have physical keys or vacant possession. "
+            "The borrower, family members, or tenants may still be occupying the premises. "
+            "The auction purchaser or bank must apply to the District Magistrate or Chief Metropolitan Magistrate "
+            "under Section 14 to physically evict occupants and take possession."
+        )
+
+    lines = [
+        f"### Possession Status: Lot #{prop.id}",
+        f"Address: {prop.address}",
+        "",
+        f"Current Status: {possession_type}",
+        "",
+        desc,
+        "",
+        "Recommended Due Diligence:",
+        "• Conduct an in-person site visit to verify who is currently occupying or residing at the premises.",
+        "• Inquire with the Authorized Officer whether a Section 14 petition has been filed with the District Magistrate.",
+    ]
+
+    action_links = [
+        {"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"},
+        {"title": "Deep Due Diligence Analysis", "url": f"/properties/{prop.id}"},
+    ]
+    citations = []
+    if target_doc:
+        doc_id, doc_title, filename, s_name = target_doc
+        chunk_id, page_no = target_chunk if target_chunk else (None, 1)
+        action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{doc_id}/file"})
+        citations.append(
+            Citation(
+                kind="document",
+                source_id=f"doc:{doc_id}",
+                title=doc_title or "Auction Notice",
+                excerpt=possession_excerpt or f"Possession type: {possession_type}",
+                score=1.0,
+                document_id=doc_id,
+                chunk_id=chunk_id,
+                page_number=page_no,
+                property_id=property_id,
+                filename=filename,
+                source_name=s_name,
+            )
+        )
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="property_possession_inquiry",
+    )
+
+
+def _handle_liens_inquiry(db: Session, property_id: int, question: str) -> AnalystResponse:
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+        )
+
+    pdocs = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).all()
+    doc_ids = [pd.document_id for pd in pdocs]
+
+    liens_found = []
+    target_doc = None
+    target_chunk = None
+
+    if doc_ids:
+        chunks = (
+            db.query(
+                DocumentChunk.id,
+                DocumentChunk.page_number,
+                DocumentChunk.text,
+                Document.id.label("doc_id"),
+                Document.title,
+                Document.filename,
+                Document.source_name,
+            )
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .filter(DocumentChunk.document_id.in_(doc_ids))
+            .all()
+        )
+        for chunk_id, page_no, text, doc_id, doc_title, filename, s_name in chunks:
+            c_lower = text.lower()
+            if any(k in c_lower for k in ["encumbrance", "prior charge", "dues", "arrears", "tax", "litigation"]):
+                for line in text.split("\n"):
+                    if any(k in line.lower() for k in ["encumbrance", "dues", "arrears", "tax", "charge"]) and len(line.strip()) > 10:
+                        liens_found.append(line.strip())
+                        if not target_doc:
+                            target_doc = (doc_id, doc_title, filename, s_name)
+                            target_chunk = (chunk_id, page_no)
+                        if len(liens_found) >= 3:
+                            break
+
+    lines = [
+        f"### Liens and Encumbrances Audit: Lot #{prop.id}",
+        f"Property: {prop.address}",
+        "",
+        "Legal Sale Terms: 'As is where is, As is what is, and Whatever there is'.",
+        "",
+    ]
+
+    if liens_found:
+        lines.append("Disclosed in Notice:")
+        for item in liens_found[:3]:
+            lines.append(f"• {item}")
+        lines.append("")
+    else:
+        lines.extend([
+            "Notice Disclosure: No specific prior mortgages or competing commercial charges were declared by the bank in the published notice.",
+            "",
+        ])
+
+    lines.extend([
+        "Critical Investor Caveats:",
+        "• Statutory and Municipal Dues: Unpaid property taxes, electricity/water arrears, and municipal dues are not extinguished by SARFAESI auctions and transfer to the purchaser.",
+        "• Encumbrance Certificate (EC): Obtain an independent 30-year Encumbrance Certificate from the local Sub-Registrar's office to confirm clear title and rule out undisclosed third-party claims.",
+    ])
+
+    action_links = [
+        {"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"},
+        {"title": "Deep Due Diligence Analysis", "url": f"/properties/{prop.id}"},
+    ]
+    citations = []
+    if target_doc:
+        doc_id, doc_title, filename, s_name = target_doc
+        chunk_id, page_no = target_chunk if target_chunk else (None, 1)
+        action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{doc_id}/file"})
+        citations.append(
+            Citation(
+                kind="document",
+                source_id=f"doc:{doc_id}",
+                title=doc_title or "Auction Notice",
+                excerpt="; ".join(liens_found[:2]) if liens_found else "Sold on As is where is basis",
+                score=1.0,
+                document_id=doc_id,
+                chunk_id=chunk_id,
+                page_number=page_no,
+                property_id=property_id,
+                filename=filename,
+                source_name=s_name,
+            )
+        )
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="property_liens_inquiry",
+    )
+
+
+def _handle_address_inquiry(db: Session, property_id: int, question: str) -> AnalystResponse:
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        return AnalystResponse(
+            question=question,
+            answer=f"Property #{property_id} was not found in the database.",
+            property_id=property_id,
+        )
+
+    pdocs = db.query(PropertyDocument).filter(PropertyDocument.property_id == property_id).all()
+    doc_ids = [pd.document_id for pd in pdocs]
+
+    boundaries = {}
+    target_doc = None
+    target_chunk = None
+
+    if doc_ids:
+        chunks = (
+            db.query(
+                DocumentChunk.id,
+                DocumentChunk.page_number,
+                DocumentChunk.text,
+                Document.id.label("doc_id"),
+                Document.title,
+                Document.filename,
+                Document.source_name,
+            )
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .filter(DocumentChunk.document_id.in_(doc_ids))
+            .all()
+        )
+        for chunk_id, page_no, text, doc_id, doc_title, filename, s_name in chunks:
+            for dir_key in ["East", "West", "North", "South"]:
+                m = re.search(rf"\b{dir_key}\s*[:-]\s*([^,\n;.]+)", text, re.IGNORECASE)
+                if m and dir_key not in boundaries:
+                    boundaries[dir_key] = m.group(1).strip()
+            if len(boundaries) >= 2 and not target_doc:
+                target_doc = (doc_id, doc_title, filename, s_name)
+                target_chunk = (chunk_id, page_no)
+
+    lines = [
+        f"### Legal Property Location: Lot #{prop.id}",
+        "",
+        f"Official Address: {prop.address}",
+        f"City: {prop.city or 'Unspecified City'}",
+        f"Locality: {prop.locality or 'Unspecified'}",
+        f"Asset Category: {prop.property_type or 'Property'}",
+        f"Land / Built-up Area: {f'{prop.area_sqft} sq ft' if prop.area_sqft else 'Unspecified in summary'}",
+        f"Revenue / Survey No: {prop.survey_number or 'Unspecified in summary'}",
+    ]
+
+    if boundaries:
+        lines.extend([
+            "",
+            "Registered Boundaries (from Notice):",
+            *(f"• {direction}: {bound}" for direction, bound in boundaries.items()),
+        ])
+
+    lines.extend([
+        "",
+        "Verification Tip: Validate these exact boundaries and revenue numbers against local Revenue Department / land registry records before bidding.",
+    ])
+
+    action_links = [
+        {"title": f"View Property Details #{prop.id}", "url": f"/properties/{prop.id}"},
+        {"title": "Deep Due Diligence Analysis", "url": f"/properties/{prop.id}"},
+    ]
+    citations = []
+    if target_doc:
+        doc_id, doc_title, filename, s_name = target_doc
+        chunk_id, page_no = target_chunk if target_chunk else (None, 1)
+        action_links.append({"title": "Download Original Auction Notice", "url": f"/documents/{doc_id}/file"})
+        citations.append(
+            Citation(
+                kind="document",
+                source_id=f"doc:{doc_id}",
+                title=doc_title or "Auction Notice",
+                excerpt=f"Boundaries: {', '.join(f'{k}: {v}' for k, v in boundaries.items())}",
+                score=1.0,
+                document_id=doc_id,
+                chunk_id=chunk_id,
+                page_number=page_no,
+                property_id=property_id,
+                filename=filename,
+                source_name=s_name,
+            )
+        )
+
+    return AnalystResponse(
+        question=question,
+        answer="\n".join(lines),
+        property_id=property_id,
+        citations=citations,
+        action_links=action_links,
+        intent="property_address_inquiry",
     )
 
 

@@ -329,7 +329,7 @@ Actively investigate these red flags:
 
 Never treat the absence of a risk reference in retrieved text as proof that the risk is absent. If the relevant document or page was not retrieved, say that the issue remains unverified. Separate bank-published reserve price from a comparable-based market estimate and from an asking price.
 
-Answer with: (1) risk disposition, (2) financial snapshot, (3) evidence-backed red flags, (4) unresolved risks and missing evidence, and (5) concrete checks required before bidding. Cite every material factual claim using the supplied [number] references and page numbers when available. If the evidence is insufficient, explicitly say so; never give unconditional legal clearance or an unconditional investment recommendation.
+Answer style: Directly and concisely answer the researcher's specific question in 2-4 short, punchy paragraphs or bullet points. Do not produce rigid 5-part essays unless specifically requested. Highlight verified facts, note any unverified risks, and avoid asterisks or hyphens in section headers. Conclude with: "Select Deep Analysis for exhaustive due diligence." Cite every material factual claim using the supplied [number] references and page numbers when available. If the evidence is insufficient, explicitly say so; never give unconditional legal clearance or an unconditional investment recommendation.
 
 {structured_block}QUESTION:
 {question}

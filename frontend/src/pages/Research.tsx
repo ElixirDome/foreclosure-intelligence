@@ -21,9 +21,12 @@ const QUICK_PROMPTS = [
 ];
 
 const PROPERTY_PROMPTS = [
-  "Is this property a good investment opportunity?",
-  "What was the basis for this property's valuation?",
-  "What due diligence checks should I complete before bidding?",
+  "Is this a good deal?",
+  "How is it a good deal?",
+  "What should I look for & red flags?",
+  "Are there people possessing the property?",
+  "Are there any liens or encumbrances?",
+  "What is the proper address & boundaries?",
 ];
 
 export default function Research() {
@@ -127,11 +130,6 @@ export default function Research() {
     setInput("");
   }
 
-  function clearScope() {
-    params.delete("property_id");
-    setParams(params);
-  }
-
   return (
     <div className="ai-chat-page">
       {/* Minimalist Header */}
@@ -153,15 +151,6 @@ export default function Research() {
         </div>
 
         <div className="ai-chat-header-right">
-          {propertyId && (
-            <div className="ai-scope-badge">
-              <span>Scoped to Lot #{propertyId}</span>
-              <button type="button" onClick={clearScope} title="Clear property scope">
-                ✕
-              </button>
-            </div>
-          )}
-
           {messages.length > 0 && (
             <button type="button" className="ai-btn-ghost" onClick={clearChat} title="Clear conversation">
               Clear Chat
