@@ -134,7 +134,16 @@ def bm25_search(
         return []
 
     q = (
-        db.query(DocumentChunk, Document)
+        db.query(
+            DocumentChunk.id,
+            DocumentChunk.document_id,
+            DocumentChunk.chunk_index,
+            DocumentChunk.page_number,
+            DocumentChunk.text,
+            Document.title,
+            Document.source_name,
+            Document.filename,
+        )
         .join(Document, Document.id == DocumentChunk.document_id)
     )
     if document_id is not None:
@@ -148,8 +157,8 @@ def bm25_search(
     if not rows:
         return []
 
-    corpus = [(chunk.id, chunk.text) for chunk, _ in rows]
-    chunk_map = {chunk.id: (chunk, doc) for chunk, doc in rows}
+    corpus = [(r.id, r.text) for r in rows]
+    row_map = {r.id: r for r in rows}
 
     ranker = BM25Ranker(corpus)
     ranked = ranker.score(query)
@@ -158,21 +167,21 @@ def bm25_search(
     max_score = ranked[0][1] if ranked else 1.0
 
     for cid, raw_score in ranked[:limit]:
-        chunk, doc = chunk_map[cid]
+        r = row_map[cid]
         # Normalize score to 0.0 - 1.0 range
         norm_score = min(1.0, raw_score / max(max_score, 1.0))
         results.append(
             RetrievedChunk(
-                chunk_id=chunk.id,
-                document_id=chunk.document_id,
-                chunk_index=chunk.chunk_index,
-                page_number=chunk.page_number,
-                text=chunk.text,
+                chunk_id=r.id,
+                document_id=r.document_id,
+                chunk_index=r.chunk_index,
+                page_number=r.page_number,
+                text=r.text,
                 score=float(norm_score),
                 method="bm25",
-                document_title=doc.title,
-                source_name=doc.source_name,
-                filename=doc.filename,
+                document_title=r.title,
+                source_name=r.source_name,
+                filename=r.filename,
             )
         )
     return results
@@ -195,7 +204,12 @@ def vector_search(
 
     query_vec = embed_text(query, task="query")
     q = (
-        db.query(DocumentChunk, Document)
+        db.query(
+            DocumentChunk,
+            Document.title,
+            Document.source_name,
+            Document.filename,
+        )
         .join(Document, Document.id == DocumentChunk.document_id)
     )
     if document_id is not None:
@@ -206,7 +220,7 @@ def vector_search(
         q = q.filter(DocumentChunk.document_id.in_(document_ids))
 
     scored: list[RetrievedChunk] = []
-    for chunk, doc in q.all():
+    for chunk, doc_title, doc_source_name, doc_filename in q.all():
         meta = chunk.metadata_json or {}
         emb = meta.get("embedding")
         active_model = embedding_model_id()
@@ -220,7 +234,7 @@ def vector_search(
             meta = dict(meta)
             meta["embedding"] = emb
             meta["embedding_version"] = EMBEDDING_VERSION
-            meta["embedding_model"] = embedding_model_id()
+            meta["embedding_model"] = active_model
             chunk.metadata_json = meta
 
         score = cosine_similarity(query_vec, emb)
@@ -235,9 +249,9 @@ def vector_search(
                 text=chunk.text,
                 score=float(score),
                 method="vector",
-                document_title=doc.title,
-                source_name=doc.source_name,
-                filename=doc.filename,
+                document_title=doc_title,
+                source_name=doc_source_name,
+                filename=doc_filename,
             )
         )
 

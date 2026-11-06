@@ -472,19 +472,26 @@ def get_properties(
     if properties:
         prop_ids = [item["id"] for item in properties]
         rows = (
-            db.query(PropertyDocument, Document)
+            db.query(
+                PropertyDocument.property_id,
+                Document.source_name,
+                Document.source_url,
+                Document.document_type,
+                Document.title,
+                Document.filename,
+            )
             .join(Document, Document.id == PropertyDocument.document_id)
             .filter(PropertyDocument.property_id.in_(prop_ids))
             .all()
         )
         by_prop: dict[int, list] = {}
-        for link, doc in rows:
-            by_prop.setdefault(link.property_id, []).append({
-                "source_name": doc.source_name,
-                "source_url": doc.source_url,
-                "document_type": doc.document_type,
-                "title": doc.title,
-                "filename": doc.filename,
+        for prop_id, s_name, s_url, d_type, d_title, d_fname in rows:
+            by_prop.setdefault(prop_id, []).append({
+                "source_name": s_name,
+                "source_url": s_url,
+                "document_type": d_type,
+                "title": d_title,
+                "filename": d_fname,
             })
         for item in properties:
             item["sources"] = by_prop.get(item["id"], [])

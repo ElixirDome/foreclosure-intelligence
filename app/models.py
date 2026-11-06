@@ -293,7 +293,9 @@ class Document(Base):
 
     # Full normalized text after extraction/OCR. Used for chunking and
     # keyword retrieval before vector search exists.
-    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Deferred by default so large PDF texts are not pulled into memory
+    # on general joins and queries (prevents PostgreSQL printtup OutOfMemory).
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True, deferred=True)
 
     content_hash: Mapped[str | None] = mapped_column(
         String,

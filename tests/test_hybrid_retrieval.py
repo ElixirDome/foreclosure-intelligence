@@ -77,6 +77,30 @@ class TestStableEmbeddings:
         assert vector == [0.6, 0.8]
         assert embeddings.embedding_model_id() == "ollama:nomic-embed-text"
 
+    def test_gemini_semantic_backend_fallback_when_ollama_fails(self, monkeypatch):
+        class FakeGeminiResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"embedding": {"values": [3.0, 4.0]}}
+
+        monkeypatch.setattr(embeddings, "OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+        monkeypatch.setattr(embeddings, "_OLLAMA_UNAVAILABLE", False)
+        monkeypatch.setattr(embeddings, "GEMINI_API_KEY", "fake-gemini-key")
+        monkeypatch.setattr(embeddings, "_GEMINI_UNAVAILABLE", False)
+
+        def mock_post(url, *args, **kwargs):
+            if "11434" in url:
+                raise RuntimeError("500 Server Error: Internal Server Error")
+            return FakeGeminiResponse()
+
+        monkeypatch.setattr(embeddings.requests, "post", mock_post)
+
+        vector = embeddings.embed_text("auction reserve price", dim=2)
+        assert vector == [0.6, 0.8]
+        assert embeddings.embedding_model_id() == "gemini:gemini-embedding-001"
+
 
 class TestMultiQueryGeneration:
     def test_simple_queries_not_expanded(self):
@@ -206,3 +230,38 @@ class TestParallelSearchAndFaultTolerance:
         assert citation.document_id == doc.id
         assert citation.page_number == 2
         assert "physical possession" in citation.excerpt.lower()
+
+    def test_bm25_search_does_not_load_large_extracted_text(self, db):
+        now = datetime.now(timezone.utc)
+        large_text = "DUMMY_NOTICE_TEXT " * 50000  # 1 MB of text
+        doc = Document(
+            title="Large Sale Notice",
+            filename="large_notice.pdf",
+            source_name="PNB",
+            source_url="https://pnbindia.in/large_notice.pdf",
+            document_type="auction_notice",
+            extracted_text=large_text,
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+        db.add(doc)
+        db.commit()
+
+        chunk = DocumentChunk(
+            document_id=doc.id,
+            chunk_index=0,
+            page_number=1,
+            text="Plot No 99 Industrial Estate, reserve price Rs 99,00,000.",
+        )
+        db.add(chunk)
+        db.commit()
+
+        # Run BM25 search
+        results = bm25_search(db, "Industrial Estate 9900000", limit=3)
+        assert len(results) >= 1
+        assert results[0].chunk_id == chunk.id
+        assert results[0].document_title == "Large Sale Notice"
+
+        # Verify that doc.extracted_text was not fetched into the session during search
+        # (it stays deferred or not present on the query results)
+        assert results[0].text == "Plot No 99 Industrial Estate, reserve price Rs 99,00,000."
